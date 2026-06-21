@@ -3,8 +3,9 @@
 import argparse
 import sys
 
-from src.db import get_connection, initialize_database
+from src.db import get_all_chunks, get_connection, initialize_database
 from src.ingest.ingest import ingest_folder
+from src.retrieval.keyword import score_chunks
 
 
 def list_docs() -> int:
@@ -22,7 +23,7 @@ def list_docs() -> int:
         ).fetchall()
 
     if not rows:
-        print("No documents found. Run: python main.py ingest notes/")
+        print("No documents found. Run: python3 main.py ingest notes/")
         return 0
 
     for row in rows:
@@ -80,6 +81,40 @@ def show_chunks(document_id: int) -> int:
     return 0
 
 
+def build_preview(text: str, max_length: int = 240) -> str:
+    """Turn chunk text into a compact one-line preview for search output."""
+    preview = " ".join(text.split())
+    if len(preview) <= max_length:
+        return preview
+    return f"{preview[:max_length].rstrip()}..."
+
+
+def search(query: str) -> int:
+    """Rank stored chunks for a keyword query and print the top results."""
+    with get_connection() as conn:
+        initialize_database(conn)
+        chunks = get_all_chunks(conn)
+
+    if not chunks:
+        print("No chunks found. Run: python3 main.py ingest notes/")
+        return 0
+
+    results = score_chunks(query, chunks)
+    if not results:
+        print(f'No matching chunks found for: "{query}"')
+        return 0
+
+    for rank, result in enumerate(results, start=1):
+        print(
+            f"{rank}. Chunk {result['chunk_id']} | {result['filename']} | "
+            f"chunk {result['chunk_index']} | score {result['score']}"
+        )
+        print(f"   {build_preview(str(result['text']))}")
+        print()
+
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     """Create the CLI parser and its supported commands."""
     parser = argparse.ArgumentParser(
@@ -98,6 +133,11 @@ def build_parser() -> argparse.ArgumentParser:
         "show-chunks", help="Print chunks for a stored document."
     )
     chunks_parser.add_argument("document_id", type=int, help="Document id to inspect.")
+
+    search_parser = subparsers.add_parser(
+        "search", help="Find the top matching chunks with keyword search."
+    )
+    search_parser.add_argument("query", help='Search terms, e.g. "fast slow pointer"')
 
     return parser
 
@@ -121,6 +161,9 @@ def main() -> int:
 
         if args.command == "show-chunks":
             return show_chunks(args.document_id)
+
+        if args.command == "search":
+            return search(args.query)
 
     except (FileNotFoundError, NotADirectoryError, ValueError) as exc:
         print(f"Error: {exc}", file=sys.stderr)

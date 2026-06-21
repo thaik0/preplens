@@ -84,3 +84,15 @@ def insert_chunks(
             for chunk in chunks
         ],
     )
+
+
+def get_all_chunks(conn: sqlite3.Connection) -> list[sqlite3.Row]:
+    """Return every stored chunk with the filename needed for search results."""
+    return conn.execute(
+        """
+        SELECT c.id, c.chunk_index, c.text, d.filename
+        FROM chunks c
+        JOIN documents d ON d.id = c.document_id
+        ORDER BY c.id
+        """
+    ).fetchall()
