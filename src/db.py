@@ -47,6 +47,21 @@ def initialize_database(conn: sqlite3.Connection) -> None:
         )
         """
     )
+    # Embeddings live separately so a chunk can later be embedded by more than
+    # one model without duplicating the original source text.
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS chunk_embeddings (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            chunk_id INTEGER NOT NULL,
+            model TEXT NOT NULL,
+            embedding_json TEXT NOT NULL,
+            created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (chunk_id) REFERENCES chunks (id),
+            UNIQUE (chunk_id, model)
+        )
+        """
+    )
     conn.commit()
 
 
@@ -95,4 +110,58 @@ def get_all_chunks(conn: sqlite3.Connection) -> list[sqlite3.Row]:
         JOIN documents d ON d.id = c.document_id
         ORDER BY c.id
         """
+    ).fetchall()
+
+
+def get_chunks_without_embeddings(
+    conn: sqlite3.Connection, model: str
+) -> list[sqlite3.Row]:
+    """Return chunks that do not yet have an embedding for the given model."""
+    return conn.execute(
+        """
+        SELECT c.id, c.text
+        FROM chunks c
+        LEFT JOIN chunk_embeddings e
+            ON e.chunk_id = c.id AND e.model = ?
+        WHERE e.id IS NULL
+        ORDER BY c.id
+        """,
+        (model,),
+    ).fetchall()
+
+
+def count_chunks(conn: sqlite3.Connection) -> int:
+    """Return the number of stored chunks."""
+    row = conn.execute("SELECT COUNT(*) AS chunk_count FROM chunks").fetchone()
+    return int(row["chunk_count"])
+
+
+def insert_chunk_embedding(
+    conn: sqlite3.Connection, chunk_id: int, model: str, embedding_json: str
+) -> None:
+    """Store one serialized embedding for a chunk and model."""
+    conn.execute(
+        """
+        INSERT INTO chunk_embeddings (chunk_id, model, embedding_json)
+        VALUES (?, ?, ?)
+        """,
+        (chunk_id, model, embedding_json),
+    )
+
+
+def get_chunk_embeddings(
+    conn: sqlite3.Connection, model: str
+) -> list[sqlite3.Row]:
+    """Return stored embeddings together with the chunk metadata for display."""
+    return conn.execute(
+        """
+        SELECT c.id AS chunk_id, c.chunk_index, c.text, d.filename,
+               e.embedding_json
+        FROM chunk_embeddings e
+        JOIN chunks c ON c.id = e.chunk_id
+        JOIN documents d ON d.id = c.document_id
+        WHERE e.model = ?
+        ORDER BY c.id
+        """,
+        (model,),
     ).fetchall()

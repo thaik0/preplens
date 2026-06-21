@@ -5,6 +5,7 @@ import sys
 
 from src.db import get_all_chunks, get_connection, initialize_database
 from src.ingest.ingest import ingest_folder
+from src.retrieval.embeddings import embed_stored_chunks, semantic_search
 from src.retrieval.keyword import score_chunks
 
 
@@ -115,6 +116,35 @@ def search(query: str) -> int:
     return 0
 
 
+def embed_chunks() -> int:
+    """Generate and store missing semantic embeddings for every chunk."""
+    result = embed_stored_chunks()
+    print(
+        f"Created {result['created_count']} embeddings and skipped "
+        f"{result['skipped_count']} existing embeddings."
+    )
+    return 0
+
+
+def run_semantic_search(query: str) -> int:
+    """Print the most semantically similar stored chunks for a query."""
+    results = semantic_search(query)
+    if not results:
+        print("No chunk embeddings found. Run: python3 main.py embed-chunks")
+        return 0
+
+    for rank, result in enumerate(results, start=1):
+        print(
+            f"{rank}. Chunk {result['chunk_id']} | {result['filename']} | "
+            f"chunk {result['chunk_index']} | cosine similarity "
+            f"{float(result['score']):.4f}"
+        )
+        print(f"   {build_preview(str(result['text']))}")
+        print()
+
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     """Create the CLI parser and its supported commands."""
     parser = argparse.ArgumentParser(
@@ -138,6 +168,17 @@ def build_parser() -> argparse.ArgumentParser:
         "search", help="Find the top matching chunks with keyword search."
     )
     search_parser.add_argument("query", help='Search terms, e.g. "fast slow pointer"')
+
+    subparsers.add_parser(
+        "embed-chunks", help="Generate embeddings for chunks missing the selected model."
+    )
+
+    semantic_search_parser = subparsers.add_parser(
+        "semantic-search", help="Find the top matching chunks by meaning."
+    )
+    semantic_search_parser.add_argument(
+        "query", help='Question to search for, e.g. "how do I find a loop?"'
+    )
 
     return parser
 
@@ -165,7 +206,13 @@ def main() -> int:
         if args.command == "search":
             return search(args.query)
 
-    except (FileNotFoundError, NotADirectoryError, ValueError) as exc:
+        if args.command == "embed-chunks":
+            return embed_chunks()
+
+        if args.command == "semantic-search":
+            return run_semantic_search(args.query)
+
+    except (FileNotFoundError, NotADirectoryError, RuntimeError, ValueError) as exc:
         print(f"Error: {exc}", file=sys.stderr)
         return 1
     except OSError as exc:
