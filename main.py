@@ -6,7 +6,14 @@ import sys
 from src.db import get_all_chunks, get_connection, initialize_database
 from src.generation.answer import DEFAULT_ANSWER_MODEL, generate_grounded_answer
 from src.ingest.ingest import ingest_folder
-from src.logging.query_log import get_query_details, get_recent_queries, log_ask_run
+from src.logging.query_log import (
+    FEEDBACK_TYPES,
+    add_feedback,
+    get_feedback_summary,
+    get_query_details,
+    get_recent_queries,
+    log_ask_run,
+)
 from src.retrieval.embeddings import embed_stored_chunks, semantic_search
 from src.retrieval.hybrid import hybrid_search
 from src.retrieval.keyword import score_chunks
@@ -246,13 +253,37 @@ def show_query(query_id: int) -> int:
 
     for result in results:
         cited = "yes" if result["was_cited"] else "no"
+        feedback = str(result["feedback"]) or "none"
         print(
             f"{result['rank']}. Chunk {result['chunk_id']} | "
             f"{result['filename']} | chunk {result['chunk_index']} | "
-            f"hybrid score {float(result['hybrid_score']):.4f} | cited: {cited}"
+            f"hybrid score {float(result['hybrid_score']):.4f} | cited: {cited} | "
+            f"feedback: {feedback}"
         )
         print(f"   {build_preview(str(result['text']))}")
 
+    return 0
+
+
+def feedback(
+    query_id: int, chunk_id: int, feedback_type: str, comment: str | None
+) -> int:
+    """Save one feedback label for a chunk from a past ask retrieval."""
+    feedback_id = add_feedback(query_id, chunk_id, feedback_type, comment)
+    print(
+        f"Saved feedback ID: {feedback_id} | query {query_id} | "
+        f"chunk {chunk_id} | {feedback_type}"
+    )
+    return 0
+
+
+def feedback_summary() -> int:
+    """Print aggregate feedback counts."""
+    summary = get_feedback_summary()
+    print(f"Total feedback entries: {summary['total_feedback']}")
+    print(f"Helpful: {summary['helpful_count']}")
+    print(f"Not helpful: {summary['not_helpful_count']}")
+    print(f"Wrong source: {summary['wrong_source_count']}")
     return 0
 
 
@@ -333,6 +364,20 @@ def build_parser() -> argparse.ArgumentParser:
     )
     show_query_parser.add_argument("query_id", type=int, help="Saved query id to inspect.")
 
+    feedback_parser = subparsers.add_parser(
+        "feedback", help="Save feedback for a chunk retrieved by a past ask run."
+    )
+    feedback_parser.add_argument("query_id", type=int, help="Saved query id.")
+    feedback_parser.add_argument("chunk_id", type=int, help="Retrieved chunk id.")
+    feedback_parser.add_argument(
+        "feedback_type", choices=sorted(FEEDBACK_TYPES), help="Feedback label."
+    )
+    feedback_parser.add_argument("--comment", help="Optional explanation for the label.")
+
+    subparsers.add_parser(
+        "feedback-summary", help="Show aggregate feedback counts."
+    )
+
     return parser
 
 
@@ -376,6 +421,14 @@ def main() -> int:
 
         if args.command == "show-query":
             return show_query(args.query_id)
+
+        if args.command == "feedback":
+            return feedback(
+                args.query_id, args.chunk_id, args.feedback_type, args.comment
+            )
+
+        if args.command == "feedback-summary":
+            return feedback_summary()
 
     except (FileNotFoundError, NotADirectoryError, RuntimeError, ValueError) as exc:
         print(f"Error: {exc}", file=sys.stderr)

@@ -104,6 +104,22 @@ def initialize_database(conn: sqlite3.Connection) -> None:
         )
         """
     )
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS feedback (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            query_id INTEGER NOT NULL,
+            chunk_id INTEGER NOT NULL,
+            feedback_type TEXT NOT NULL CHECK (
+                feedback_type IN ('helpful', 'not_helpful', 'wrong_source')
+            ),
+            comment TEXT,
+            created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (query_id) REFERENCES queries (id),
+            FOREIGN KEY (chunk_id) REFERENCES chunks (id)
+        )
+        """
+    )
     conn.commit()
 
 
