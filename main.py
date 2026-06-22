@@ -4,6 +4,7 @@ import argparse
 import sys
 
 from src.db import get_all_chunks, get_connection, initialize_database
+from src.evaluation.retrieval_eval import METHODS, evaluate_retrieval
 from src.generation.answer import DEFAULT_ANSWER_MODEL, generate_grounded_answer
 from src.ingest.ingest import ingest_folder
 from src.logging.query_log import (
@@ -287,6 +288,30 @@ def feedback_summary() -> int:
     return 0
 
 
+def eval_retrieval(evaluation_path: str, alpha: float, top_k: int) -> int:
+    """Print aggregate metrics for all retrieval methods on labeled questions."""
+    report = evaluate_retrieval(evaluation_path, alpha=alpha, top_k=top_k)
+    print(f"Evaluation questions: {report['question_count']}")
+    print(f"Alpha: {alpha}")
+    print(f"Retrieval depth: {top_k}")
+
+    for method in METHODS:
+        metrics = report[method]
+        if not isinstance(metrics, dict):
+            continue
+        print()
+        print(method)
+        print(f"  top_1_accuracy: {float(metrics['top_1_accuracy']):.3f}")
+        print(f"  top_3_recall: {float(metrics['top_3_recall']):.3f}")
+        print(f"  top_5_recall: {float(metrics['top_5_recall']):.3f}")
+        print(
+            f"  mean_reciprocal_rank: "
+            f"{float(metrics['mean_reciprocal_rank']):.3f}"
+        )
+
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     """Create the CLI parser and its supported commands."""
     parser = argparse.ArgumentParser(
@@ -378,6 +403,23 @@ def build_parser() -> argparse.ArgumentParser:
         "feedback-summary", help="Show aggregate feedback counts."
     )
 
+    eval_parser = subparsers.add_parser(
+        "eval-retrieval", help="Compare retrieval methods on labeled questions."
+    )
+    eval_parser.add_argument("evaluation_path", help="Path to an evaluation JSON file.")
+    eval_parser.add_argument(
+        "--alpha",
+        type=float,
+        default=0.5,
+        help="Keyword weight for hybrid retrieval (default: 0.5).",
+    )
+    eval_parser.add_argument(
+        "--top-k",
+        type=int,
+        default=5,
+        help="Results to retrieve per method; must be at least 5 (default: 5).",
+    )
+
     return parser
 
 
@@ -429,6 +471,9 @@ def main() -> int:
 
         if args.command == "feedback-summary":
             return feedback_summary()
+
+        if args.command == "eval-retrieval":
+            return eval_retrieval(args.evaluation_path, args.alpha, args.top_k)
 
     except (FileNotFoundError, NotADirectoryError, RuntimeError, ValueError) as exc:
         print(f"Error: {exc}", file=sys.stderr)

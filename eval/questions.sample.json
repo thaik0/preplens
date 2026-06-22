@@ -1,0 +1,27 @@
+[
+  {
+    "question": "When should I use fast and slow pointers?",
+    "relevant_chunk_ids": [1],
+    "notes": "Exact wording should retrieve the fast/slow pointer chunk."
+  },
+  {
+    "question": "How do I find a loop in a linked list?",
+    "relevant_chunk_ids": [1],
+    "notes": "Loop should semantically map to cycle detection."
+  },
+  {
+    "question": "How do I tell if a linked list repeats forever?",
+    "relevant_chunk_ids": [1],
+    "notes": "Different wording for linked list cycle detection."
+  },
+  {
+    "question": "How do I find the middle node of a linked list?",
+    "relevant_chunk_ids": [1],
+    "notes": "Should retrieve fast/slow pointer chunk."
+  },
+  {
+    "question": "What mistake should I avoid when moving fast twice?",
+    "relevant_chunk_ids": [1],
+    "notes": "Should retrieve the common mistake about checking fast and fast.next."
+  }
+]
