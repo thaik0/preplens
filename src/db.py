@@ -62,6 +62,48 @@ def initialize_database(conn: sqlite3.Connection) -> None:
         )
         """
     )
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS queries (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            query_text TEXT NOT NULL,
+            retrieval_method TEXT NOT NULL,
+            alpha REAL NOT NULL,
+            top_k INTEGER NOT NULL,
+            model TEXT NOT NULL,
+            created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+        )
+        """
+    )
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS answers (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            query_id INTEGER NOT NULL UNIQUE,
+            answer_text TEXT NOT NULL,
+            created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (query_id) REFERENCES queries (id)
+        )
+        """
+    )
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS retrieval_results (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            query_id INTEGER NOT NULL,
+            chunk_id INTEGER NOT NULL,
+            "rank" INTEGER NOT NULL,
+            keyword_score REAL NOT NULL,
+            normalized_keyword_score REAL NOT NULL,
+            semantic_score REAL NOT NULL,
+            normalized_semantic_score REAL NOT NULL,
+            hybrid_score REAL NOT NULL,
+            was_cited INTEGER NOT NULL CHECK (was_cited IN (0, 1)),
+            FOREIGN KEY (query_id) REFERENCES queries (id),
+            FOREIGN KEY (chunk_id) REFERENCES chunks (id)
+        )
+        """
+    )
     conn.commit()
 
 

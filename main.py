@@ -4,8 +4,11 @@ import argparse
 import sys
 
 from src.db import get_all_chunks, get_connection, initialize_database
+from src.generation.answer import DEFAULT_ANSWER_MODEL, generate_grounded_answer
 from src.ingest.ingest import ingest_folder
+from src.logging.query_log import get_query_details, get_recent_queries, log_ask_run
 from src.retrieval.embeddings import embed_stored_chunks, semantic_search
+from src.retrieval.hybrid import hybrid_search
 from src.retrieval.keyword import score_chunks
 
 
@@ -145,6 +148,114 @@ def run_semantic_search(query: str) -> int:
     return 0
 
 
+def run_hybrid_search(query: str, alpha: float) -> int:
+    """Print the top chunks ranked by combined keyword and semantic scores."""
+    results = hybrid_search(query, alpha=alpha)
+    if not results:
+        print("No chunks found. Run: python3 main.py ingest notes/")
+        return 0
+
+    for rank, result in enumerate(results, start=1):
+        print(
+            f"{rank}. Chunk {result['chunk_id']} | {result['filename']} | "
+            f"chunk {result['chunk_index']}"
+        )
+        print(
+            f"   keyword: raw {float(result['keyword_score']):.4f}, "
+            f"normalized {float(result['normalized_keyword_score']):.4f}"
+        )
+        print(
+            f"   semantic: raw {float(result['semantic_score']):.4f}, "
+            f"normalized {float(result['normalized_semantic_score']):.4f}"
+        )
+        print(f"   hybrid: {float(result['hybrid_score']):.4f}")
+        print(f"   {build_preview(str(result['text']))}")
+        print()
+
+    return 0
+
+
+def ask(question: str, top_k: int, alpha: float, model: str) -> int:
+    """Retrieve source chunks, then generate a citation-backed answer from them."""
+    # Retrieval happens before generation so the model sees only relevant,
+    # inspectable evidence rather than being asked to answer from memory.
+    results = hybrid_search(question, alpha=alpha, limit=top_k)
+    if not results:
+        print("No chunks found. Run: python3 main.py ingest notes/")
+        return 0
+
+    answer = generate_grounded_answer(question, results, model=model)
+    query_id = log_ask_run(question, alpha, top_k, model, answer, results)
+
+    print(f"Question: {question}")
+    print()
+    print("Answer:")
+    print(answer)
+    print()
+    print(f"Saved query ID: {query_id}")
+    print()
+    print("Sources used for retrieval:")
+
+    for rank, result in enumerate(results, start=1):
+        print(
+            f"{rank}. Chunk {result['chunk_id']} | {result['filename']} | "
+            f"chunk {result['chunk_index']} | hybrid score "
+            f"{float(result['hybrid_score']):.4f}"
+        )
+        print(f"   {build_preview(str(result['text']))}")
+
+    return 0
+
+
+def history() -> int:
+    """Print recently logged ask queries."""
+    queries = get_recent_queries()
+    if not queries:
+        print("No saved queries found. Run: python3 main.py ask \"your question\"")
+        return 0
+
+    for query in queries:
+        print(
+            f"{query['id']}: {build_preview(str(query['query_text']), 100)} | "
+            f"{query['model']} | {query['retrieval_method']} | "
+            f"{query['created_at']}"
+        )
+
+    return 0
+
+
+def show_query(query_id: int) -> int:
+    """Print one saved question, its answer, and its retrieved chunk snapshot."""
+    query, results = get_query_details(query_id)
+    if query is None:
+        print(f"No saved query found with id {query_id}.", file=sys.stderr)
+        return 1
+
+    print(f"Query ID: {query['id']}")
+    print(f"Question: {query['query_text']}")
+    print(
+        f"Settings: {query['retrieval_method']} | alpha {query['alpha']} | "
+        f"top_k {query['top_k']} | model {query['model']}"
+    )
+    print(f"Created: {query['created_at']}")
+    print()
+    print("Answer:")
+    print(query["answer_text"])
+    print()
+    print("Retrieved chunks:")
+
+    for result in results:
+        cited = "yes" if result["was_cited"] else "no"
+        print(
+            f"{result['rank']}. Chunk {result['chunk_id']} | "
+            f"{result['filename']} | chunk {result['chunk_index']} | "
+            f"hybrid score {float(result['hybrid_score']):.4f} | cited: {cited}"
+        )
+        print(f"   {build_preview(str(result['text']))}")
+
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     """Create the CLI parser and its supported commands."""
     parser = argparse.ArgumentParser(
@@ -180,6 +291,48 @@ def build_parser() -> argparse.ArgumentParser:
         "query", help='Question to search for, e.g. "how do I find a loop?"'
     )
 
+    hybrid_search_parser = subparsers.add_parser(
+        "hybrid-search", help="Combine keyword matches with semantic similarity."
+    )
+    hybrid_search_parser.add_argument(
+        "query", help='Question to search for, e.g. "how do I find a loop?"'
+    )
+    hybrid_search_parser.add_argument(
+        "--alpha",
+        type=float,
+        default=0.5,
+        help="Keyword weight from 0.0 to 1.0 (default: 0.5).",
+    )
+
+    ask_parser = subparsers.add_parser(
+        "ask", help="Answer a question using retrieved source chunks."
+    )
+    ask_parser.add_argument("question", help="Question to answer from your notes.")
+    ask_parser.add_argument(
+        "--top-k",
+        type=int,
+        default=5,
+        help="Number of source chunks to retrieve (default: 5).",
+    )
+    ask_parser.add_argument(
+        "--alpha",
+        type=float,
+        default=0.5,
+        help="Keyword weight from 0.0 to 1.0 (default: 0.5).",
+    )
+    ask_parser.add_argument(
+        "--model",
+        default=DEFAULT_ANSWER_MODEL,
+        help=f"OpenAI model for answer generation (default: {DEFAULT_ANSWER_MODEL}).",
+    )
+
+    subparsers.add_parser("history", help="List recent saved ask queries.")
+
+    show_query_parser = subparsers.add_parser(
+        "show-query", help="Inspect one saved ask query and its sources."
+    )
+    show_query_parser.add_argument("query_id", type=int, help="Saved query id to inspect.")
+
     return parser
 
 
@@ -211,6 +364,18 @@ def main() -> int:
 
         if args.command == "semantic-search":
             return run_semantic_search(args.query)
+
+        if args.command == "hybrid-search":
+            return run_hybrid_search(args.query, args.alpha)
+
+        if args.command == "ask":
+            return ask(args.question, args.top_k, args.alpha, args.model)
+
+        if args.command == "history":
+            return history()
+
+        if args.command == "show-query":
+            return show_query(args.query_id)
 
     except (FileNotFoundError, NotADirectoryError, RuntimeError, ValueError) as exc:
         print(f"Error: {exc}", file=sys.stderr)
