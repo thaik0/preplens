@@ -7,6 +7,7 @@ from src.db import get_all_chunks, get_connection, initialize_database
 from src.evaluation.retrieval_eval import METHODS, evaluate_retrieval
 from src.generation.answer import DEFAULT_ANSWER_MODEL, generate_grounded_answer
 from src.ingest.ingest import ingest_folder
+from src.logging.interactive_feedback import collect_source_feedback
 from src.logging.query_log import (
     FEEDBACK_TYPES,
     add_feedback,
@@ -15,7 +16,14 @@ from src.logging.query_log import (
     get_recent_queries,
     log_ask_run,
 )
-from src.retrieval.embeddings import embed_stored_chunks, semantic_search
+from src.retrieval.embeddings import (
+    EMBEDDING_MODEL,
+    embed_stored_chunks,
+    embed_stored_queries,
+    semantic_search,
+    similar_queries,
+)
+from src.retrieval.feedback_aware import feedback_search as feedback_aware_search
 from src.retrieval.hybrid import hybrid_search
 from src.retrieval.keyword import score_chunks
 
@@ -137,6 +145,16 @@ def embed_chunks() -> int:
     return 0
 
 
+def embed_queries(model: str) -> int:
+    """Generate and store missing semantic embeddings for logged queries."""
+    result = embed_stored_queries(model)
+    print(
+        f"Created {result['created_count']} query embeddings and skipped "
+        f"{result['skipped_count']} existing query embeddings."
+    )
+    return 0
+
+
 def run_semantic_search(query: str) -> int:
     """Print the most semantically similar stored chunks for a query."""
     results = semantic_search(query)
@@ -151,6 +169,24 @@ def run_semantic_search(query: str) -> int:
             f"{float(result['score']):.4f}"
         )
         print(f"   {build_preview(str(result['text']))}")
+        print()
+
+    return 0
+
+
+def run_similar_queries(query: str, model: str) -> int:
+    """Print logged queries closest in meaning to a new query."""
+    results = similar_queries(query, model=model)
+    if not results:
+        print("No query embeddings found. Run: python3 main.py embed-queries")
+        return 0
+
+    for rank, result in enumerate(results, start=1):
+        print(
+            f"{rank}. Query {result['query_id']} | cosine similarity "
+            f"{float(result['score']):.4f} | {result['created_at']}"
+        )
+        print(f"   {build_preview(str(result['query_text']))}")
         print()
 
     return 0
@@ -183,7 +219,65 @@ def run_hybrid_search(query: str, alpha: float) -> int:
     return 0
 
 
-def ask(question: str, top_k: int, alpha: float, model: str) -> int:
+def run_feedback_search(
+    query: str,
+    top_k: int,
+    candidate_k: int,
+    alpha: float,
+    similarity_threshold: float,
+    gamma: float,
+) -> int:
+    """Print hybrid results reranked by feedback from similar past queries."""
+    report = feedback_aware_search(
+        query,
+        top_k=top_k,
+        candidate_k=candidate_k,
+        alpha=alpha,
+        similarity_threshold=similarity_threshold,
+        gamma=gamma,
+    )
+    results = report["results"]
+    diagnostics = report["diagnostics"]
+    if not isinstance(results, list) or not isinstance(diagnostics, dict):
+        raise RuntimeError("Feedback search returned an invalid report.")
+
+    if not diagnostics["used_feedback"]:
+        print("No similar feedback found; results fall back to hybrid ranking.")
+        print()
+
+    for rank, result in enumerate(results, start=1):
+        print(
+            f"{rank}. Chunk {result['chunk_id']} | {result['filename']} | "
+            f"chunk {result['chunk_index']}"
+        )
+        print(f"   hybrid score: {float(result['hybrid_score']):.4f}")
+        print(f"   feedback score: {float(result['feedback_score']):.4f}")
+        print(f"   final score: {float(result['final_score']):.4f}")
+        print(f"   {build_preview(str(result['text']))}")
+        print()
+
+    print("Diagnostics:")
+    print(f"  Past query embeddings checked: {diagnostics['checked_query_embeddings']}")
+    print(f"  Similar queries above threshold: {diagnostics['similar_query_count']}")
+    print(f"  Feedback labels used: {diagnostics['feedback_labels_used']}")
+    print("  Top similar queries:")
+    top_similar_queries = diagnostics["top_similar_queries"]
+    if not top_similar_queries:
+        print("    none")
+    else:
+        for similar_query in top_similar_queries:
+            print(
+                f"    Query {similar_query['query_id']} | similarity "
+                f"{float(similar_query['similarity']):.4f}"
+            )
+            print(f"      {build_preview(str(similar_query['query_text']), 120)}")
+
+    return 0
+
+
+def ask(
+    question: str, top_k: int, alpha: float, model: str, collect_feedback: bool = False
+) -> int:
     """Retrieve source chunks, then generate a citation-backed answer from them."""
     # Retrieval happens before generation so the model sees only relevant,
     # inspectable evidence rather than being asked to answer from memory.
@@ -211,6 +305,12 @@ def ask(question: str, top_k: int, alpha: float, model: str) -> int:
             f"{float(result['hybrid_score']):.4f}"
         )
         print(f"   {build_preview(str(result['text']))}")
+
+    if collect_feedback:
+        # The ask run is saved first, then feedback reuses the same validation
+        # rules as the standalone feedback command for the retrieved chunks.
+        _, logged_results = get_query_details(query_id)
+        collect_source_feedback(query_id, logged_results, build_preview)
 
     return 0
 
@@ -340,11 +440,33 @@ def build_parser() -> argparse.ArgumentParser:
         "embed-chunks", help="Generate embeddings for chunks missing the selected model."
     )
 
+    embed_queries_parser = subparsers.add_parser(
+        "embed-queries",
+        help="Generate embeddings for logged queries missing the selected model.",
+    )
+    embed_queries_parser.add_argument(
+        "--model",
+        default=EMBEDDING_MODEL,
+        help=f"Embedding model to use (default: {EMBEDDING_MODEL}).",
+    )
+
     semantic_search_parser = subparsers.add_parser(
         "semantic-search", help="Find the top matching chunks by meaning."
     )
     semantic_search_parser.add_argument(
         "query", help='Question to search for, e.g. "how do I find a loop?"'
+    )
+
+    similar_queries_parser = subparsers.add_parser(
+        "similar-queries", help="Find logged queries with similar meaning."
+    )
+    similar_queries_parser.add_argument(
+        "query", help='Question to compare, e.g. "how do I find a loop?"'
+    )
+    similar_queries_parser.add_argument(
+        "--model",
+        default=EMBEDDING_MODEL,
+        help=f"Embedding model to use (default: {EMBEDDING_MODEL}).",
     )
 
     hybrid_search_parser = subparsers.add_parser(
@@ -358,6 +480,44 @@ def build_parser() -> argparse.ArgumentParser:
         type=float,
         default=0.5,
         help="Keyword weight from 0.0 to 1.0 (default: 0.5).",
+    )
+
+    feedback_search_parser = subparsers.add_parser(
+        "feedback-search",
+        help="Rerank hybrid retrieval with feedback from similar past queries.",
+    )
+    feedback_search_parser.add_argument(
+        "query", help='Question to search for, e.g. "how do I find a loop?"'
+    )
+    feedback_search_parser.add_argument(
+        "--top-k",
+        type=int,
+        default=5,
+        help="Number of final chunks to return (default: 5).",
+    )
+    feedback_search_parser.add_argument(
+        "--candidate-k",
+        type=int,
+        default=20,
+        help="Hybrid candidates to rerank before final output (default: 20).",
+    )
+    feedback_search_parser.add_argument(
+        "--alpha",
+        type=float,
+        default=0.5,
+        help="Keyword weight for hybrid candidate generation (default: 0.5).",
+    )
+    feedback_search_parser.add_argument(
+        "--similarity-threshold",
+        type=float,
+        default=0.65,
+        help="Minimum past-query similarity needed to use feedback (default: 0.65).",
+    )
+    feedback_search_parser.add_argument(
+        "--gamma",
+        type=float,
+        default=0.20,
+        help="Weight applied to the feedback score (default: 0.20).",
     )
 
     ask_parser = subparsers.add_parser(
@@ -380,6 +540,11 @@ def build_parser() -> argparse.ArgumentParser:
         "--model",
         default=DEFAULT_ANSWER_MODEL,
         help=f"OpenAI model for answer generation (default: {DEFAULT_ANSWER_MODEL}).",
+    )
+    ask_parser.add_argument(
+        "--feedback",
+        action="store_true",
+        help="Prompt for feedback on each retrieved source after the answer is saved.",
     )
 
     subparsers.add_parser("history", help="List recent saved ask queries.")
@@ -449,14 +614,36 @@ def main() -> int:
         if args.command == "embed-chunks":
             return embed_chunks()
 
+        if args.command == "embed-queries":
+            return embed_queries(args.model)
+
         if args.command == "semantic-search":
             return run_semantic_search(args.query)
+
+        if args.command == "similar-queries":
+            return run_similar_queries(args.query, args.model)
 
         if args.command == "hybrid-search":
             return run_hybrid_search(args.query, args.alpha)
 
+        if args.command == "feedback-search":
+            return run_feedback_search(
+                args.query,
+                args.top_k,
+                args.candidate_k,
+                args.alpha,
+                args.similarity_threshold,
+                args.gamma,
+            )
+
         if args.command == "ask":
-            return ask(args.question, args.top_k, args.alpha, args.model)
+            return ask(
+                args.question,
+                args.top_k,
+                args.alpha,
+                args.model,
+                args.feedback,
+            )
 
         if args.command == "history":
             return history()

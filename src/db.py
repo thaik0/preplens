@@ -75,6 +75,22 @@ def initialize_database(conn: sqlite3.Connection) -> None:
         )
         """
     )
+    # Query embeddings are stored separately from query text so future
+    # feedback-aware retrieval can compare new questions with past questions
+    # without changing the logged query records.
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS query_embeddings (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            query_id INTEGER NOT NULL,
+            model TEXT NOT NULL,
+            embedding_json TEXT NOT NULL,
+            created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (query_id) REFERENCES queries (id),
+            UNIQUE (query_id, model)
+        )
+        """
+    )
     conn.execute(
         """
         CREATE TABLE IF NOT EXISTS answers (
@@ -222,4 +238,75 @@ def get_chunk_embeddings(
         ORDER BY c.id
         """,
         (model,),
+    ).fetchall()
+
+
+def get_queries_without_embeddings(
+    conn: sqlite3.Connection, model: str
+) -> list[sqlite3.Row]:
+    """Return logged queries that do not yet have an embedding for this model."""
+    return conn.execute(
+        """
+        SELECT q.id, q.query_text
+        FROM queries q
+        LEFT JOIN query_embeddings e
+            ON e.query_id = q.id AND e.model = ?
+        WHERE e.id IS NULL
+        ORDER BY q.id
+        """,
+        (model,),
+    ).fetchall()
+
+
+def count_queries(conn: sqlite3.Connection) -> int:
+    """Return the number of logged ask queries."""
+    row = conn.execute("SELECT COUNT(*) AS query_count FROM queries").fetchone()
+    return int(row["query_count"])
+
+
+def insert_query_embedding(
+    conn: sqlite3.Connection, query_id: int, model: str, embedding_json: str
+) -> None:
+    """Store one serialized embedding for a logged query and model."""
+    conn.execute(
+        """
+        INSERT INTO query_embeddings (query_id, model, embedding_json)
+        VALUES (?, ?, ?)
+        """,
+        (query_id, model, embedding_json),
+    )
+
+
+def get_query_embeddings(
+    conn: sqlite3.Connection, model: str
+) -> list[sqlite3.Row]:
+    """Return stored query embeddings with query metadata for similarity search."""
+    return conn.execute(
+        """
+        SELECT q.id AS query_id, q.query_text, q.created_at, e.embedding_json
+        FROM query_embeddings e
+        JOIN queries q ON q.id = e.query_id
+        WHERE e.model = ?
+        ORDER BY q.id
+        """,
+        (model,),
+    ).fetchall()
+
+
+def get_feedback_for_queries(
+    conn: sqlite3.Connection, query_ids: list[int]
+) -> list[sqlite3.Row]:
+    """Return feedback labels attached to the provided logged query IDs."""
+    if not query_ids:
+        return []
+
+    placeholders = ", ".join("?" for _ in query_ids)
+    return conn.execute(
+        f"""
+        SELECT query_id, chunk_id, feedback_type
+        FROM feedback
+        WHERE query_id IN ({placeholders})
+        ORDER BY query_id, id
+        """,
+        query_ids,
     ).fetchall()

@@ -1,8 +1,8 @@
 """OpenAI embedding helpers and simple semantic ranking for PrepLens.
 
 An embedding is a list of numbers representing the meaning of a text string.
-PrepLens stores one embedding per chunk so it can compare a question with note
-chunks without generating an answer.
+PrepLens stores embeddings for chunks and logged queries so it can compare text
+by meaning without generating an answer.
 """
 
 import json
@@ -13,11 +13,15 @@ from typing import Any
 
 from src.db import (
     count_chunks,
+    count_queries,
     get_chunk_embeddings,
     get_chunks_without_embeddings,
     get_connection,
+    get_queries_without_embeddings,
+    get_query_embeddings,
     initialize_database,
     insert_chunk_embedding,
+    insert_query_embedding,
 )
 
 
@@ -87,6 +91,13 @@ def store_embedding(
     insert_chunk_embedding(conn, chunk_id, model, json.dumps(embedding))
 
 
+def store_query_embedding(
+    conn: sqlite3.Connection, query_id: int, model: str, embedding: list[float]
+) -> None:
+    """Serialize a logged query embedding before saving it in SQLite."""
+    insert_query_embedding(conn, query_id, model, json.dumps(embedding))
+
+
 def load_embeddings(
     conn: sqlite3.Connection, model: str
 ) -> list[dict[str, int | str | list[float]]]:
@@ -119,6 +130,37 @@ def load_embeddings(
     return embeddings
 
 
+def load_query_embeddings(
+    conn: sqlite3.Connection, model: str
+) -> list[dict[str, int | str | list[float]]]:
+    """Load stored JSON vectors with query fields needed for inspection."""
+    embeddings: list[dict[str, int | str | list[float]]] = []
+    for row in get_query_embeddings(conn, model):
+        try:
+            embedding = json.loads(str(row["embedding_json"]))
+        except json.JSONDecodeError as exc:
+            raise ValueError(
+                f"Stored embedding for query {row['query_id']} is not valid JSON."
+            ) from exc
+
+        if not isinstance(embedding, list) or not all(
+            isinstance(value, (int, float)) for value in embedding
+        ):
+            raise ValueError(
+                f"Stored embedding for query {row['query_id']} is not a number list."
+            )
+
+        embeddings.append(
+            {
+                "query_id": int(row["query_id"]),
+                "query_text": str(row["query_text"]),
+                "created_at": str(row["created_at"]),
+                "embedding": [float(value) for value in embedding],
+            }
+        )
+    return embeddings
+
+
 def embed_stored_chunks(model: str = EMBEDDING_MODEL) -> dict[str, int]:
     """Create and store embeddings for chunks that are missing this model."""
     with get_connection() as conn:
@@ -137,6 +179,28 @@ def embed_stored_chunks(model: str = EMBEDDING_MODEL) -> dict[str, int]:
         conn.commit()
 
     return {"created_count": len(missing_chunks), "skipped_count": skipped_count}
+
+
+def embed_stored_queries(model: str = EMBEDDING_MODEL) -> dict[str, int]:
+    """Create and store embeddings for logged queries missing this model."""
+    with get_connection() as conn:
+        initialize_database(conn)
+        missing_queries = get_queries_without_embeddings(conn, model)
+        skipped_count = count_queries(conn) - len(missing_queries)
+
+        if not missing_queries:
+            return {"created_count": 0, "skipped_count": skipped_count}
+
+        # Already embedded queries are skipped because embeddings are stable for
+        # a fixed text/model pair, and skipping avoids repeated API cost.
+        client = create_openai_client()
+        for query in missing_queries:
+            embedding = generate_embedding(str(query["query_text"]), model, client)
+            store_query_embedding(conn, int(query["id"]), model, embedding)
+
+        conn.commit()
+
+    return {"created_count": len(missing_queries), "skipped_count": skipped_count}
 
 
 def semantic_search(
@@ -173,4 +237,43 @@ def semantic_search(
     return sorted(
         results,
         key=lambda result: (-float(result["score"]), int(result["chunk_id"])),
+    )[:limit]
+
+
+def similar_queries(
+    query: str, model: str = EMBEDDING_MODEL, limit: int = 5
+) -> list[dict[str, int | str | float]]:
+    """Return past logged queries closest in meaning to an input query."""
+    if limit <= 0:
+        raise ValueError("limit must be greater than 0.")
+
+    with get_connection() as conn:
+        initialize_database(conn)
+        stored_embeddings = load_query_embeddings(conn, model)
+
+    if not stored_embeddings:
+        return []
+
+    # Comparing a new query to past query embeddings is the raw material for
+    # future feedback-aware retrieval: similar past questions can reveal which
+    # retrieved chunks users marked helpful or wrong_source.
+    query_embedding = generate_embedding(query, model)
+    results: list[dict[str, int | str | float]] = []
+    for stored in stored_embeddings:
+        embedding = stored["embedding"]
+        if not isinstance(embedding, list):
+            continue
+
+        results.append(
+            {
+                "query_id": int(stored["query_id"]),
+                "query_text": str(stored["query_text"]),
+                "created_at": str(stored["created_at"]),
+                "score": cosine_similarity(query_embedding, embedding),
+            }
+        )
+
+    return sorted(
+        results,
+        key=lambda result: (-float(result["score"]), int(result["query_id"])),
     )[:limit]
