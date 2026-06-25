@@ -1,9 +1,74 @@
 # PrepLens
 
-PrepLens is a source-grounded interview prep assistant.
+PrepLens is a source-grounded interview prep assistant that helps users search their own study notes, retrieve relevant source chunks, generate cited answers, and collect feedback on retrieval quality.
 
-The goal is to help users query their own interview prep notes, inspect retrieved source chunks, and eventually improve retrieval using feedback.
+I did this project because as I was prepping for interviews I would often ask ChatGPT/Claude questions about problems and would get frustrated with their hallucination. I'm sure you've experienced this; you ask something and it spits out something completely unrelated. This project is meant as a way to avoid that issue.
 
-## Current Status
+Right now its a local CLI backend MVP.
 
-Initial MVP setup.
+## What Works Now
+
+- ingest `.md` and `.txt` study notes
+- split notes into overlapping chunks
+- store documents, chunks, embeddings, queries, answers, and feedback in SQLite
+- search notes using keyword retrieval
+- search notes using OpenAI embeddings and cosine similarity
+- combine keyword and semantic search with hybrid retrieval
+- generate citation-backed answers from retrieved chunks
+- log query history, retrieved sources, generated answers, and citations
+- collect source-level feedback such as `helpful`, `not_helpful`, and `wrong_source`
+- use feedback from semantically similar past queries to rerank retrieval results
+- evaluate retrieval quality using top-k recall and MRR
+
+## Tech Stack
+
+- Python
+- SQLite
+- OpenAI API
+- OpenAI embeddings
+- NumPy
+- JSON evaluation files
+- CLI interface
+
+## Depth
+
+PrepLens is focused on the retrieval system around the LLM. It tracks which chunks were retrieved, which chunks were cited, whether users found those chunks helpful, and whether different retrieval methods actually find the right sources.
+
+The current retrieval methods are:
+
+- **Keyword search:** exact term matching baseline
+- **Semantic search:** embedding-based search using cosine similarity
+- **Hybrid search:** weighted combination of keyword and semantic scores
+- **Feedback-aware search:** reranks hybrid candidates using feedback from semantically similar past queries
+
+## Local Development
+
+PrepLens currently runs as a local CLI tool.
+
+Basic workflow:
+
+```bash
+python3 main.py ingest notes/
+python3 main.py embed-chunks
+python3 main.py ask "how do I detect a cycle in a linked list?"
+python3 main.py eval-retrieval eval/questions.sample.json --include-feedback
+```
+
+OpenAI API access is required for embeddings and answer generation. API keys should be stored locally through environment variables and should not be committed.
+
+## Roadmap
+
+Near-term:
+
+- add more interview prep notes
+- expand the hand-labeled eval set
+- improve setup docs and examples
+- add tests
+
+Next architecture phase:
+
+- add a FastAPI backend
+- Dockerize the app
+- migrate to Postgres
+- use cloud object storage for uploaded notes
+- deploy the service
