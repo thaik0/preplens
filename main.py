@@ -4,7 +4,7 @@ import argparse
 import sys
 
 from src.db import get_all_chunks, get_connection, initialize_database
-from src.evaluation.retrieval_eval import METHODS, evaluate_retrieval
+from src.evaluation.retrieval_eval import evaluate_retrieval
 from src.generation.answer import DEFAULT_ANSWER_MODEL, generate_grounded_answer
 from src.ingest.ingest import ingest_folder
 from src.logging.interactive_feedback import collect_source_feedback
@@ -388,26 +388,101 @@ def feedback_summary() -> int:
     return 0
 
 
-def eval_retrieval(evaluation_path: str, alpha: float, top_k: int) -> int:
+# This warning matters because feedback-aware retrieval can accidentally see
+# labels collected from the same or nearly same questions used for evaluation.
+FEEDBACK_EVAL_WARNING = (
+    "Feedback-aware evaluation may overestimate performance if feedback from "
+    "identical or near-identical eval queries is already present in the database. "
+    "For a more honest evaluation, use separate feedback/training queries and "
+    "eval/test queries."
+)
+
+
+def eval_retrieval(
+    evaluation_path: str,
+    alpha: float,
+    top_k: int,
+    include_feedback: bool,
+    candidate_k: int,
+    similarity_threshold: float,
+    gamma: float,
+    verbose: bool,
+) -> int:
     """Print aggregate metrics for all retrieval methods on labeled questions."""
-    report = evaluate_retrieval(evaluation_path, alpha=alpha, top_k=top_k)
+    report = evaluate_retrieval(
+        evaluation_path,
+        alpha=alpha,
+        top_k=top_k,
+        include_feedback=include_feedback,
+        candidate_k=candidate_k,
+        similarity_threshold=similarity_threshold,
+        gamma=gamma,
+        verbose=verbose,
+    )
     print(f"Evaluation questions: {report['question_count']}")
     print(f"Alpha: {alpha}")
     print(f"Retrieval depth: {top_k}")
+    if include_feedback:
+        print(f"Candidate depth: {candidate_k}")
+        print(f"Similarity threshold: {similarity_threshold}")
+        print(f"Gamma: {gamma}")
+        print()
+        print(f"Warning: {FEEDBACK_EVAL_WARNING}")
+        if int(report["feedback_labels_used"]) == 0:
+            print(
+                "No usable feedback found; feedback-aware results are equivalent "
+                "to hybrid for these queries."
+            )
 
-    for method in METHODS:
+    print()
+    print(f"{'Method':<18} {'Top-1':>7} {'Top-3':>7} {'Top-5':>7} {'MRR':>7}")
+    print(f"{'-' * 18} {'-' * 7} {'-' * 7} {'-' * 7} {'-' * 7}")
+
+    methods = report["methods"]
+    if not isinstance(methods, list):
+        raise RuntimeError("Evaluation report is missing method names.")
+
+    for method in methods:
         metrics = report[method]
         if not isinstance(metrics, dict):
             continue
-        print()
-        print(method)
-        print(f"  top_1_accuracy: {float(metrics['top_1_accuracy']):.3f}")
-        print(f"  top_3_recall: {float(metrics['top_3_recall']):.3f}")
-        print(f"  top_5_recall: {float(metrics['top_5_recall']):.3f}")
         print(
-            f"  mean_reciprocal_rank: "
-            f"{float(metrics['mean_reciprocal_rank']):.3f}"
+            f"{str(method):<18} "
+            f"{float(metrics['top_1_accuracy']):>7.2f} "
+            f"{float(metrics['top_3_recall']):>7.2f} "
+            f"{float(metrics['top_5_recall']):>7.2f} "
+            f"{float(metrics['mean_reciprocal_rank']):>7.2f}"
         )
+
+    if verbose:
+        print()
+        print("Per-question details:")
+        per_question = report["per_question"]
+        if not isinstance(per_question, list):
+            raise RuntimeError("Evaluation report is missing verbose details.")
+        for index, item in enumerate(per_question, start=1):
+            if not isinstance(item, dict):
+                continue
+            print()
+            print(f"{index}. {item['question']}")
+            relevant_ids = ", ".join(
+                str(chunk_id) for chunk_id in item["relevant_chunk_ids"]
+            )
+            print(f"   Relevant chunk IDs: {relevant_ids}")
+            method_details = item["methods"]
+            if not isinstance(method_details, dict):
+                continue
+            for method in methods:
+                details = method_details[str(method)]
+                chunk_ids = ", ".join(
+                    str(chunk_id) for chunk_id in details["ranked_chunk_ids"]
+                )
+                first_rank = details["first_relevant_rank"]
+                rank_text = str(first_rank) if first_rank is not None else "not found"
+                print(
+                    f"   {str(method):<18} top chunks: [{chunk_ids}] | "
+                    f"first relevant rank: {rank_text}"
+                )
 
     return 0
 
@@ -584,6 +659,34 @@ def build_parser() -> argparse.ArgumentParser:
         default=5,
         help="Results to retrieve per method; must be at least 5 (default: 5).",
     )
+    eval_parser.add_argument(
+        "--include-feedback",
+        action="store_true",
+        help="Also evaluate feedback-aware retrieval.",
+    )
+    eval_parser.add_argument(
+        "--candidate-k",
+        type=int,
+        default=20,
+        help="Hybrid candidates for feedback-aware evaluation (default: 20).",
+    )
+    eval_parser.add_argument(
+        "--similarity-threshold",
+        type=float,
+        default=0.65,
+        help="Minimum past-query similarity for feedback use (default: 0.65).",
+    )
+    eval_parser.add_argument(
+        "--gamma",
+        type=float,
+        default=0.20,
+        help="Feedback score weight for feedback-aware evaluation (default: 0.20).",
+    )
+    eval_parser.add_argument(
+        "--verbose",
+        action="store_true",
+        help="Print per-question rankings and first relevant ranks.",
+    )
 
     return parser
 
@@ -660,7 +763,16 @@ def main() -> int:
             return feedback_summary()
 
         if args.command == "eval-retrieval":
-            return eval_retrieval(args.evaluation_path, args.alpha, args.top_k)
+            return eval_retrieval(
+                args.evaluation_path,
+                args.alpha,
+                args.top_k,
+                args.include_feedback,
+                args.candidate_k,
+                args.similarity_threshold,
+                args.gamma,
+                args.verbose,
+            )
 
     except (FileNotFoundError, NotADirectoryError, RuntimeError, ValueError) as exc:
         print(f"Error: {exc}", file=sys.stderr)
