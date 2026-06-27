@@ -2,7 +2,7 @@
 
 from typing import Any, Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class HealthResponse(BaseModel):
@@ -72,10 +72,33 @@ class FeedbackSearchResponse(SearchResponse):
 
 
 class AskRequest(BaseModel):
+    model_config = ConfigDict(
+        json_schema_extra={
+            "examples": [
+                {
+                    "question": "how do I detect a cycle in a linked list?",
+                    "top_k": 5,
+                    "alpha": 0.5,
+                    "model": None,
+                },
+                {
+                    "question": "how do I detect a cycle in a linked list?",
+                    "top_k": 5,
+                    "alpha": 0.5,
+                    "model": "gpt-4o-mini",
+                },
+            ]
+        }
+    )
+
     question: str = Field(..., min_length=1)
     top_k: int = Field(5, ge=1)
     alpha: float = Field(0.5, ge=0.0, le=1.0)
-    model: str | None = None
+    model: str | None = Field(
+        default=None,
+        description="Optional answer model. Omit or set null to use the default.",
+        examples=["gpt-4o-mini"],
+    )
 
 
 class AskResponse(BaseModel):

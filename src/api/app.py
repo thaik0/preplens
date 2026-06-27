@@ -38,11 +38,25 @@ T = TypeVar("T")
 app = FastAPI(title="PrepLens API", version="0.1.0")
 
 
-def _error_detail(error: str, message: str, setup_command: str | None = None) -> dict[str, str]:
+def _error_detail(
+    error: str, message: str, setup_command: str | None = None
+) -> dict[str, str]:
     detail = {"error": error, "message": message}
     if setup_command is not None:
         detail["setup_command"] = setup_command
     return detail
+
+
+def _normalize_ask_model(model: str | None) -> str:
+    # Swagger may send placeholder strings; normalize them to the service default.
+    if model is None:
+        return DEFAULT_ANSWER_MODEL
+
+    normalized = model.strip()
+    if normalized == "" or normalized.lower() == "string":
+        return DEFAULT_ANSWER_MODEL
+
+    return normalized
 
 
 def _service_call(callback: Callable[[], T]) -> T:
@@ -149,7 +163,7 @@ def ask(request: AskRequest) -> dict[str, Any]:
             request.question,
             top_k=request.top_k,
             alpha=request.alpha,
-            model=request.model or DEFAULT_ANSWER_MODEL,
+            model=_normalize_ask_model(request.model),
         )
     )
 
