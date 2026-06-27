@@ -6,6 +6,10 @@ import src.api.app as api_app
 client = TestClient(api_app.app)
 
 
+# API route tests use monkeypatching to isolate HTTP behavior from OpenAI,
+# embeddings, and local database state.
+
+
 def test_health_returns_ok() -> None:
     response = client.get("/health")
 

@@ -10,8 +10,11 @@ DB_PATH = Path("data") / "preplens.db"
 
 
 @contextmanager
-def get_connection(db_path: Path = DB_PATH) -> Iterator[sqlite3.Connection]:
+def get_connection(db_path: Path | None = None) -> Iterator[sqlite3.Connection]:
     """Open a SQLite connection for a block of work, then close it."""
+    if db_path is None:
+        db_path = DB_PATH
+
     db_path.parent.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(db_path)
     conn.row_factory = sqlite3.Row
