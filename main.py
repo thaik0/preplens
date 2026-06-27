@@ -3,53 +3,49 @@
 import argparse
 import sys
 
-from src.db import get_all_chunks, get_connection, initialize_database
-from src.evaluation.retrieval_eval import evaluate_retrieval
-from src.generation.answer import DEFAULT_ANSWER_MODEL, generate_grounded_answer
-from src.ingest.ingest import ingest_folder
 from src.logging.interactive_feedback import collect_source_feedback
-from src.logging.query_log import (
-    FEEDBACK_TYPES,
-    add_feedback,
-    get_feedback_summary,
-    get_query_details,
-    get_recent_queries,
-    log_ask_run,
-)
-from src.retrieval.embeddings import (
+from src.services.ask_service import DEFAULT_ANSWER_MODEL, ask_question
+from src.services.embedding_service import (
     EMBEDDING_MODEL,
-    embed_stored_chunks,
-    embed_stored_queries,
-    semantic_search,
-    similar_queries,
+    embed_chunks as embed_chunks_service,
+    embed_queries as embed_queries_service,
+    find_similar_queries,
 )
-from src.retrieval.feedback_aware import feedback_search as feedback_aware_search
-from src.retrieval.hybrid import hybrid_search
-from src.retrieval.keyword import score_chunks
+from src.services.eval_service import run_retrieval_evaluation
+from src.services.feedback_service import (
+    FEEDBACK_TYPES,
+    add_source_feedback,
+    get_feedback_summary_report,
+)
+from src.services.history_service import list_query_history, show_query_details
+from src.services.ingest_service import (
+    get_document_chunks,
+    ingest_notes,
+    list_documents,
+)
+from src.services.search_service import (
+    build_preview,
+    feedback_chunk_search,
+    hybrid_chunk_search,
+    keyword_search,
+    semantic_chunk_search,
+)
 
 
 def list_docs() -> int:
     """Print all documents currently stored in SQLite."""
-    with get_connection() as conn:
-        initialize_database(conn)
-        rows = conn.execute(
-            """
-            SELECT d.id, d.filename, d.file_type, d.filepath, COUNT(c.id) AS chunk_count
-            FROM documents d
-            LEFT JOIN chunks c ON c.document_id = d.id
-            GROUP BY d.id
-            ORDER BY d.id
-            """
-        ).fetchall()
+    report = list_documents()
+    documents = report["documents"]
 
-    if not rows:
+    if not documents:
         print("No documents found. Run: python3 main.py ingest notes/")
         return 0
 
-    for row in rows:
+    for document in documents:
         print(
-            f"{row['id']}: {row['filename']} "
-            f"({row['file_type']}, {row['chunk_count']} chunks) - {row['filepath']}"
+            f"{document['id']}: {document['filename']} "
+            f"({document['file_type']}, {document['chunk_count']} chunks) - "
+            f"{document['filepath']}"
         )
 
     return 0
@@ -57,31 +53,13 @@ def list_docs() -> int:
 
 def show_chunks(document_id: int) -> int:
     """Print chunks for one document so their boundaries can be inspected."""
-    with get_connection() as conn:
-        initialize_database(conn)
-        document = conn.execute(
-            """
-            SELECT id, filename, filepath
-            FROM documents
-            WHERE id = ?
-            """,
-            (document_id,),
-        ).fetchone()
+    report = get_document_chunks(document_id)
+    if report is None:
+        print(f"No document found with id {document_id}.", file=sys.stderr)
+        return 1
 
-        if document is None:
-            print(f"No document found with id {document_id}.", file=sys.stderr)
-            return 1
-
-        chunks = conn.execute(
-            """
-            SELECT chunk_index, text, start_char, end_char
-            FROM chunks
-            WHERE document_id = ?
-            ORDER BY chunk_index
-            """,
-            (document_id,),
-        ).fetchall()
-
+    document = report["document"]
+    chunks = report["chunks"]
     print(f"Document {document['id']}: {document['filename']}")
     print(f"Path: {document['filepath']}")
     print()
@@ -101,35 +79,21 @@ def show_chunks(document_id: int) -> int:
     return 0
 
 
-def build_preview(text: str, max_length: int = 240) -> str:
-    """Turn chunk text into a compact one-line preview for search output."""
-    preview = " ".join(text.split())
-    if len(preview) <= max_length:
-        return preview
-    return f"{preview[:max_length].rstrip()}..."
-
-
 def search(query: str) -> int:
     """Rank stored chunks for a keyword query and print the top results."""
-    with get_connection() as conn:
-        initialize_database(conn)
-        chunks = get_all_chunks(conn)
-
-    if not chunks:
-        print("No chunks found. Run: python3 main.py ingest notes/")
-        return 0
-
-    results = score_chunks(query, chunks)
+    report = keyword_search(query)
+    results = report["results"]
     if not results:
         print(f'No matching chunks found for: "{query}"')
         return 0
 
-    for rank, result in enumerate(results, start=1):
+    for result in results:
         print(
-            f"{rank}. Chunk {result['chunk_id']} | {result['filename']} | "
-            f"chunk {result['chunk_index']} | score {result['score']}"
+            f"{result['rank']}. Chunk {result['chunk_id']} | "
+            f"{result['document_name']} | chunk {result['chunk_index']} | "
+            f"score {result['keyword_score']}"
         )
-        print(f"   {build_preview(str(result['text']))}")
+        print(f"   {result['preview']}")
         print()
 
     return 0
@@ -137,7 +101,7 @@ def search(query: str) -> int:
 
 def embed_chunks() -> int:
     """Generate and store missing semantic embeddings for every chunk."""
-    result = embed_stored_chunks()
+    result = embed_chunks_service()
     print(
         f"Created {result['created_count']} embeddings and skipped "
         f"{result['skipped_count']} existing embeddings."
@@ -147,7 +111,7 @@ def embed_chunks() -> int:
 
 def embed_queries(model: str) -> int:
     """Generate and store missing semantic embeddings for logged queries."""
-    result = embed_stored_queries(model)
+    result = embed_queries_service(model)
     print(
         f"Created {result['created_count']} query embeddings and skipped "
         f"{result['skipped_count']} existing query embeddings."
@@ -157,18 +121,20 @@ def embed_queries(model: str) -> int:
 
 def run_semantic_search(query: str) -> int:
     """Print the most semantically similar stored chunks for a query."""
-    results = semantic_search(query)
+    report = semantic_chunk_search(query)
+    results = report["results"]
     if not results:
         print("No chunk embeddings found. Run: python3 main.py embed-chunks")
         return 0
 
-    for rank, result in enumerate(results, start=1):
+    for result in results:
         print(
-            f"{rank}. Chunk {result['chunk_id']} | {result['filename']} | "
+            f"{result['rank']}. Chunk {result['chunk_id']} | "
+            f"{result['document_name']} | "
             f"chunk {result['chunk_index']} | cosine similarity "
-            f"{float(result['score']):.4f}"
+            f"{float(result['semantic_score']):.4f}"
         )
-        print(f"   {build_preview(str(result['text']))}")
+        print(f"   {result['preview']}")
         print()
 
     return 0
@@ -176,17 +142,18 @@ def run_semantic_search(query: str) -> int:
 
 def run_similar_queries(query: str, model: str) -> int:
     """Print logged queries closest in meaning to a new query."""
-    results = similar_queries(query, model=model)
+    report = find_similar_queries(query, model=model)
+    results = report["results"]
     if not results:
         print("No query embeddings found. Run: python3 main.py embed-queries")
         return 0
 
-    for rank, result in enumerate(results, start=1):
+    for result in results:
         print(
-            f"{rank}. Query {result['query_id']} | cosine similarity "
-            f"{float(result['score']):.4f} | {result['created_at']}"
+            f"{result['rank']}. Query {result['query_id']} | cosine similarity "
+            f"{float(result['semantic_score']):.4f} | {result['created_at']}"
         )
-        print(f"   {build_preview(str(result['query_text']))}")
+        print(f"   {result['preview']}")
         print()
 
     return 0
@@ -194,15 +161,16 @@ def run_similar_queries(query: str, model: str) -> int:
 
 def run_hybrid_search(query: str, alpha: float) -> int:
     """Print the top chunks ranked by combined keyword and semantic scores."""
-    results = hybrid_search(query, alpha=alpha)
+    report = hybrid_chunk_search(query, alpha=alpha)
+    results = report["results"]
     if not results:
         print("No chunks found. Run: python3 main.py ingest notes/")
         return 0
 
-    for rank, result in enumerate(results, start=1):
+    for result in results:
         print(
-            f"{rank}. Chunk {result['chunk_id']} | {result['filename']} | "
-            f"chunk {result['chunk_index']}"
+            f"{result['rank']}. Chunk {result['chunk_id']} | "
+            f"{result['document_name']} | chunk {result['chunk_index']}"
         )
         print(
             f"   keyword: raw {float(result['keyword_score']):.4f}, "
@@ -213,7 +181,7 @@ def run_hybrid_search(query: str, alpha: float) -> int:
             f"normalized {float(result['normalized_semantic_score']):.4f}"
         )
         print(f"   hybrid: {float(result['hybrid_score']):.4f}")
-        print(f"   {build_preview(str(result['text']))}")
+        print(f"   {result['preview']}")
         print()
 
     return 0
@@ -228,7 +196,7 @@ def run_feedback_search(
     gamma: float,
 ) -> int:
     """Print hybrid results reranked by feedback from similar past queries."""
-    report = feedback_aware_search(
+    report = feedback_chunk_search(
         query,
         top_k=top_k,
         candidate_k=candidate_k,
@@ -238,22 +206,20 @@ def run_feedback_search(
     )
     results = report["results"]
     diagnostics = report["diagnostics"]
-    if not isinstance(results, list) or not isinstance(diagnostics, dict):
-        raise RuntimeError("Feedback search returned an invalid report.")
 
     if not diagnostics["used_feedback"]:
         print("No similar feedback found; results fall back to hybrid ranking.")
         print()
 
-    for rank, result in enumerate(results, start=1):
+    for result in results:
         print(
-            f"{rank}. Chunk {result['chunk_id']} | {result['filename']} | "
-            f"chunk {result['chunk_index']}"
+            f"{result['rank']}. Chunk {result['chunk_id']} | "
+            f"{result['document_name']} | chunk {result['chunk_index']}"
         )
         print(f"   hybrid score: {float(result['hybrid_score']):.4f}")
         print(f"   feedback score: {float(result['feedback_score']):.4f}")
         print(f"   final score: {float(result['final_score']):.4f}")
-        print(f"   {build_preview(str(result['text']))}")
+        print(f"   {result['preview']}")
         print()
 
     print("Diagnostics:")
@@ -279,52 +245,48 @@ def ask(
     question: str, top_k: int, alpha: float, model: str, collect_feedback: bool = False
 ) -> int:
     """Retrieve source chunks, then generate a citation-backed answer from them."""
-    # Retrieval happens before generation so the model sees only relevant,
-    # inspectable evidence rather than being asked to answer from memory.
-    results = hybrid_search(question, alpha=alpha, limit=top_k)
-    if not results:
+    report = ask_question(question, top_k=top_k, alpha=alpha, model=model)
+    sources = report["sources"]
+    if not sources:
         print("No chunks found. Run: python3 main.py ingest notes/")
         return 0
-
-    answer = generate_grounded_answer(question, results, model=model)
-    query_id = log_ask_run(question, alpha, top_k, model, answer, results)
 
     print(f"Question: {question}")
     print()
     print("Answer:")
-    print(answer)
+    print(report["answer"])
     print()
-    print(f"Saved query ID: {query_id}")
+    print(f"Saved query ID: {report['query_id']}")
     print()
     print("Sources used for retrieval:")
 
-    for rank, result in enumerate(results, start=1):
+    for source in sources:
         print(
-            f"{rank}. Chunk {result['chunk_id']} | {result['filename']} | "
-            f"chunk {result['chunk_index']} | hybrid score "
-            f"{float(result['hybrid_score']):.4f}"
+            f"{source['rank']}. Chunk {source['chunk_id']} | "
+            f"{source['document_name']} | chunk {source['chunk_index']} | "
+            f"hybrid score {float(source['hybrid_score']):.4f}"
         )
-        print(f"   {build_preview(str(result['text']))}")
+        print(f"   {source['preview']}")
 
     if collect_feedback:
-        # The ask run is saved first, then feedback reuses the same validation
-        # rules as the standalone feedback command for the retrieved chunks.
-        _, logged_results = get_query_details(query_id)
-        collect_source_feedback(query_id, logged_results, build_preview)
+        details = show_query_details(int(report["query_id"]))
+        logged_results = [] if details is None else details["retrieved_chunks"]
+        collect_source_feedback(int(report["query_id"]), logged_results, build_preview)
 
     return 0
 
 
 def history() -> int:
     """Print recently logged ask queries."""
-    queries = get_recent_queries()
+    report = list_query_history()
+    queries = report["queries"]
     if not queries:
         print("No saved queries found. Run: python3 main.py ask \"your question\"")
         return 0
 
     for query in queries:
         print(
-            f"{query['id']}: {build_preview(str(query['query_text']), 100)} | "
+            f"{query['id']}: {query['preview']} | "
             f"{query['model']} | {query['retrieval_method']} | "
             f"{query['created_at']}"
         )
@@ -334,11 +296,13 @@ def history() -> int:
 
 def show_query(query_id: int) -> int:
     """Print one saved question, its answer, and its retrieved chunk snapshot."""
-    query, results = get_query_details(query_id)
-    if query is None:
+    report = show_query_details(query_id)
+    if report is None:
         print(f"No saved query found with id {query_id}.", file=sys.stderr)
         return 1
 
+    query = report["query"]
+    results = report["retrieved_chunks"]
     print(f"Query ID: {query['id']}")
     print(f"Question: {query['query_text']}")
     print(
@@ -357,11 +321,11 @@ def show_query(query_id: int) -> int:
         feedback = str(result["feedback"]) or "none"
         print(
             f"{result['rank']}. Chunk {result['chunk_id']} | "
-            f"{result['filename']} | chunk {result['chunk_index']} | "
+            f"{result['document_name']} | chunk {result['chunk_index']} | "
             f"hybrid score {float(result['hybrid_score']):.4f} | cited: {cited} | "
             f"feedback: {feedback}"
         )
-        print(f"   {build_preview(str(result['text']))}")
+        print(f"   {result['preview']}")
 
     return 0
 
@@ -370,9 +334,9 @@ def feedback(
     query_id: int, chunk_id: int, feedback_type: str, comment: str | None
 ) -> int:
     """Save one feedback label for a chunk from a past ask retrieval."""
-    feedback_id = add_feedback(query_id, chunk_id, feedback_type, comment)
+    report = add_source_feedback(query_id, chunk_id, feedback_type, comment)
     print(
-        f"Saved feedback ID: {feedback_id} | query {query_id} | "
+        f"Saved feedback ID: {report['feedback_id']} | query {query_id} | "
         f"chunk {chunk_id} | {feedback_type}"
     )
     return 0
@@ -380,7 +344,7 @@ def feedback(
 
 def feedback_summary() -> int:
     """Print aggregate feedback counts."""
-    summary = get_feedback_summary()
+    summary = get_feedback_summary_report()
     print(f"Total feedback entries: {summary['total_feedback']}")
     print(f"Helpful: {summary['helpful_count']}")
     print(f"Not helpful: {summary['not_helpful_count']}")
@@ -409,7 +373,7 @@ def eval_retrieval(
     verbose: bool,
 ) -> int:
     """Print aggregate metrics for all retrieval methods on labeled questions."""
-    report = evaluate_retrieval(
+    report = run_retrieval_evaluation(
         evaluation_path,
         alpha=alpha,
         top_k=top_k,
@@ -698,7 +662,7 @@ def main() -> int:
 
     try:
         if args.command == "ingest":
-            result = ingest_folder(args.folder)
+            result = ingest_notes(args.folder)
             print(
                 f"Ingested {result['document_count']} documents "
                 f"and {result['chunk_count']} chunks."
