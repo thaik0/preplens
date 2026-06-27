@@ -6,6 +6,9 @@ I did this project because as I was prepping for interviews I would often ask Ch
 
 Right now its a local CLI backend MVP.
 
+PrepLens is structured so CLI commands call reusable service-layer workflows in
+`src/services/`, preparing the same application logic for a future API backend.
+
 ## What Works Now
 
 - ingest `.md` and `.txt` study notes
