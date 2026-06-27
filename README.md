@@ -59,6 +59,19 @@ python3 main.py eval-retrieval eval/questions.sample.json --include-feedback
 
 OpenAI API access is required for embeddings and answer generation. API keys should be stored locally through environment variables and should not be committed.
 
+### Local API
+
+PrepLens also exposes a thin local FastAPI layer over the same service
+workflows used by the CLI.
+
+```bash
+python3 -m uvicorn src.api.app:app --reload
+```
+
+Then visit:
+
+http://127.0.0.1:8000/docs
+
 ## Roadmap
 
 Near-term:
@@ -70,7 +83,6 @@ Near-term:
 
 Next architecture phase:
 
-- add a FastAPI backend
 - Dockerize the app
 - migrate to Postgres
 - use cloud object storage for uploaded notes
