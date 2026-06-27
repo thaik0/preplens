@@ -1,0 +1,15 @@
+.git
+.venv
+__pycache__/
+*.pyc
+.DS_Store
+.env
+.env.*
+.cache/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+data/preplens.db
+data/preplens.db-*

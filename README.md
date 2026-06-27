@@ -72,6 +72,40 @@ Then visit:
 
 http://127.0.0.1:8000/docs
 
+### Docker
+
+Docker is an optional way to run the local FastAPI API. Normal local
+development does not require Docker.
+
+Build the image:
+
+```bash
+docker build -t preplens .
+```
+
+Run the container, passing your OpenAI API key at runtime:
+
+```bash
+docker run -p 8000:8000 -e OPENAI_API_KEY="your_api_key" preplens
+```
+
+Then open:
+
+http://127.0.0.1:8000/docs
+
+Smoke test:
+
+```bash
+docker build -t preplens .
+docker run -p 8000:8000 -e OPENAI_API_KEY="your_api_key" preplens
+```
+
+Visit http://127.0.0.1:8000/health or http://127.0.0.1:8000/docs.
+
+The local `data/preplens.db` file is not baked into the Docker image. For now,
+the container may create and use its own SQLite database; persistent
+storage will be handled later with volumes or Postgres.
+
 ### Tests
 
 ```bash
@@ -89,7 +123,7 @@ Near-term:
 
 Next architecture phase:
 
-- Dockerize the app
+- add persistent Docker storage
 - migrate to Postgres
 - use cloud object storage for uploaded notes
 - deploy the service
