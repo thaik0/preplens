@@ -1,3 +1,5 @@
 fastapi
+httpx
 openai>=1.0.0
+pytest
 uvicorn

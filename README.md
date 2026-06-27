@@ -72,6 +72,12 @@ Then visit:
 
 http://127.0.0.1:8000/docs
 
+### Tests
+
+```bash
+python3 -m pytest
+```
+
 ## Roadmap
 
 Near-term:
