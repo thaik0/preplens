@@ -1,0 +1,302 @@
+:root {
+  color: #1f2933;
+  background: #f5f7fb;
+  font-family:
+    Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI",
+    sans-serif;
+  line-height: 1.5;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+}
+
+button,
+textarea {
+  font: inherit;
+}
+
+button {
+  border: 1px solid #c6ced8;
+  border-radius: 6px;
+  background: #ffffff;
+  color: #1f2933;
+  cursor: pointer;
+  font-weight: 650;
+}
+
+button:hover:not(:disabled) {
+  border-color: #5a6f8f;
+}
+
+button:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+.app-shell {
+  max-width: 1180px;
+  margin: 0 auto;
+  padding: 32px 20px 48px;
+}
+
+.hero {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 24px;
+  margin-bottom: 28px;
+}
+
+.hero h1 {
+  margin: 0;
+  font-size: clamp(2rem, 5vw, 3.5rem);
+  letter-spacing: 0;
+}
+
+.hero p {
+  max-width: 720px;
+  margin: 8px 0 0;
+  color: #52606d;
+  font-size: 1.05rem;
+}
+
+.status-pill {
+  border: 1px solid #c6ced8;
+  border-radius: 999px;
+  padding: 6px 12px;
+  background: #ffffff;
+  color: #52606d;
+  white-space: nowrap;
+}
+
+.status-online {
+  color: #0f766e;
+  border-color: #99d5cb;
+}
+
+.status-offline {
+  color: #b42318;
+  border-color: #f3b5ad;
+}
+
+.app-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 320px;
+  gap: 24px;
+  align-items: start;
+}
+
+.workspace,
+.history-panel,
+.ask-panel,
+.answer-panel,
+.empty-state {
+  border: 1px solid #d8dee8;
+  border-radius: 8px;
+  background: #ffffff;
+}
+
+.workspace {
+  display: grid;
+  gap: 16px;
+  border: 0;
+  background: transparent;
+}
+
+.ask-panel,
+.answer-panel,
+.empty-state,
+.history-panel {
+  padding: 20px;
+}
+
+.ask-panel {
+  display: grid;
+  gap: 12px;
+}
+
+.ask-panel label {
+  font-weight: 700;
+}
+
+.ask-panel textarea {
+  width: 100%;
+  resize: vertical;
+  border: 1px solid #c6ced8;
+  border-radius: 6px;
+  padding: 12px;
+  color: #1f2933;
+}
+
+.ask-panel button {
+  justify-self: start;
+  min-width: 96px;
+  padding: 9px 18px;
+  color: #ffffff;
+  background: #284b63;
+  border-color: #284b63;
+}
+
+.error-banner,
+.loading-banner {
+  border-radius: 8px;
+  padding: 12px 14px;
+}
+
+.error-banner {
+  border: 1px solid #f3b5ad;
+  background: #fff5f3;
+  color: #9f1f16;
+}
+
+.loading-banner {
+  border: 1px solid #bdd7ee;
+  background: #eef7ff;
+  color: #28516f;
+}
+
+.empty-state {
+  color: #52606d;
+}
+
+.answer-header {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  align-items: flex-start;
+  margin-bottom: 16px;
+}
+
+.answer-header h2,
+.history-heading h2,
+.sources-section h3 {
+  margin: 0;
+  letter-spacing: 0;
+}
+
+.answer-header p {
+  margin: 4px 0 0;
+  color: #52606d;
+}
+
+.answer-header span {
+  color: #52606d;
+  white-space: nowrap;
+}
+
+.answer-text {
+  white-space: pre-wrap;
+  border-top: 1px solid #e4e9f0;
+  border-bottom: 1px solid #e4e9f0;
+  padding: 18px 0;
+}
+
+.sources-section {
+  margin-top: 22px;
+}
+
+.source-list {
+  display: grid;
+  gap: 12px;
+  margin-top: 12px;
+}
+
+.source-card {
+  border: 1px solid #d8dee8;
+  border-radius: 8px;
+  padding: 14px;
+  background: #fbfcfe;
+}
+
+.source-card p {
+  margin: 10px 0;
+}
+
+.source-meta,
+.source-footer,
+.feedback-row,
+.history-heading {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.source-meta,
+.history-heading {
+  justify-content: space-between;
+}
+
+.source-meta span,
+.source-footer,
+.feedback-row span,
+.history-heading span,
+.muted {
+  color: #697586;
+}
+
+.feedback-row {
+  margin-top: 12px;
+}
+
+.feedback-row button {
+  padding: 6px 10px;
+}
+
+.history-panel {
+  position: sticky;
+  top: 20px;
+}
+
+.history-list {
+  display: grid;
+  gap: 8px;
+  margin-top: 14px;
+}
+
+.history-item {
+  display: grid;
+  gap: 4px;
+  width: 100%;
+  padding: 10px;
+  text-align: left;
+  background: #ffffff;
+}
+
+.history-item.active {
+  border-color: #284b63;
+  background: #f0f5f8;
+}
+
+.history-item span,
+.history-item small {
+  color: #697586;
+}
+
+.history-item strong {
+  font-weight: 650;
+}
+
+@media (max-width: 860px) {
+  .app-shell {
+    padding: 24px 14px 36px;
+  }
+
+  .hero,
+  .answer-header {
+    display: grid;
+  }
+
+  .app-layout {
+    grid-template-columns: 1fr;
+  }
+
+  .history-panel {
+    position: static;
+  }
+}

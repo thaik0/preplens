@@ -74,6 +74,30 @@ Then visit:
 
 http://127.0.0.1:8000/docs
 
+### Local Frontend Demo
+
+Start the backend:
+
+```bash
+python3 -m uvicorn src.api.app:app --reload
+```
+
+Start the React/Vite frontend:
+
+```bash
+cd frontend
+npm install
+npm run dev
+```
+
+Then open:
+
+http://localhost:5173
+
+`OPENAI_API_KEY` must be set in the backend environment for `/ask`.
+The frontend defaults to `http://127.0.0.1:8000`; set
+`VITE_API_BASE_URL` to point it at a different API URL.
+
 ### Database Configuration
 
 By default, PrepLens uses SQLite at `data/preplens.db`.
