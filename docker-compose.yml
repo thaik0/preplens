@@ -1,0 +1,31 @@
+services:
+  db:
+    image: postgres:16
+    environment:
+      POSTGRES_DB: preplens
+      POSTGRES_USER: preplens
+      POSTGRES_PASSWORD: preplens
+    ports:
+      - "5432:5432"
+    volumes:
+      - preplens_postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U preplens -d preplens"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  api:
+    build: .
+    ports:
+      - "8000:8000"
+    environment:
+      DATABASE_URL: postgresql+psycopg://preplens:preplens@db:5432/preplens
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+    depends_on:
+      db:
+        condition: service_healthy
+
+volumes:
+  preplens_postgres_data:
+    name: preplens_postgres_data

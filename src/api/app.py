@@ -1,10 +1,15 @@
 """Thin FastAPI layer over the PrepLens service modules."""
 
-from collections.abc import Callable
+from collections.abc import AsyncIterator, Callable
+from contextlib import asynccontextmanager
+import time
 from typing import Any, TypeVar
 
 from fastapi import FastAPI, HTTPException, Query
+from fastapi.middleware.cors import CORSMiddleware
 
+from src.config import get_database_url
+from src.database.access import initialize_schema
 from src.generation.answer import DEFAULT_ANSWER_MODEL
 from src.services.ask_service import ask_question
 from src.services.feedback_service import (
@@ -35,7 +40,48 @@ from .schemas import (
 
 T = TypeVar("T")
 
-app = FastAPI(title="PrepLens API", version="0.1.0")
+POSTGRES_SCHEMA_INIT_ATTEMPTS = 10
+POSTGRES_SCHEMA_INIT_DELAY_SECONDS = 2.0
+
+
+def _initialize_external_schema_with_retries(
+    attempts: int = POSTGRES_SCHEMA_INIT_ATTEMPTS,
+    delay_seconds: float = POSTGRES_SCHEMA_INIT_DELAY_SECONDS,
+) -> None:
+    """Initialize external database schema, retrying while Postgres starts."""
+    if not get_database_url():
+        return
+
+    last_error: RuntimeError | None = None
+    for attempt in range(1, attempts + 1):
+        try:
+            initialize_schema()
+            return
+        except RuntimeError as exc:
+            last_error = exc
+            if attempt < attempts:
+                time.sleep(delay_seconds)
+
+    if last_error is not None:
+        raise last_error
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI) -> AsyncIterator[None]:
+    _initialize_external_schema_with_retries()
+    yield
+
+
+app = FastAPI(title="PrepLens API", version="0.1.0", lifespan=lifespan)
+
+# Local-development CORS for the Vite demo UI.
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["http://localhost:5173", "http://127.0.0.1:5173"],
+    allow_credentials=False,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 
 def _error_detail(

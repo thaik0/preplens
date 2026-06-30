@@ -1,4 +1,9 @@
-"""Runtime configuration for PrepLens local persistence."""
+"""Runtime configuration for PrepLens persistence.
+
+DATABASE_URL enables external database mode, including Postgres. When it is not
+set, PrepLens uses SQLite and PREPLENS_DB_PATH can override the local database
+file path.
+"""
 
 import os
 from pathlib import Path
@@ -10,7 +15,7 @@ DATABASE_URL_ENV = "DATABASE_URL"
 
 
 def get_sqlite_db_path() -> Path:
-    """Return the SQLite path used by the current process."""
+    """Return the SQLite path used when DATABASE_URL is not configured."""
     configured_path = os.getenv(PREPLENS_DB_PATH_ENV)
     if configured_path:
         return Path(configured_path)
@@ -18,5 +23,5 @@ def get_sqlite_db_path() -> Path:
 
 
 def get_database_url() -> str | None:
-    """Return a configured database URL, if one was supplied."""
+    """Return a configured external database URL, if one was supplied."""
     return os.getenv(DATABASE_URL_ENV)

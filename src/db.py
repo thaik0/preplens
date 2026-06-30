@@ -1,7 +1,7 @@
 """Legacy sqlite3 compatibility helpers for PrepLens.
 
 SQLAlchemy Core is now the preferred database access path. This module keeps
-older imports working while remaining sqlite3 usage is reduced before Postgres.
+older imports working while remaining sqlite3 usage is reduced.
 """
 
 from collections.abc import Iterator
@@ -18,6 +18,7 @@ from src.config import (
     get_sqlite_db_path,
 )
 from src.database.engine import create_sqlite_engine
+from src.database.engine import get_engine
 from src.database.access import (
     count_chunk_records,
     count_query_records,
@@ -49,6 +50,12 @@ def _resolve_db_path(db_path: Path | None = None) -> Path:
 @contextmanager
 def get_connection(db_path: Path | None = None) -> Iterator[sqlite3.Connection]:
     """Open a SQLite connection for a block of work, then close it."""
+    if get_database_url():
+        raise RuntimeError(
+            "src.db.get_connection() is SQLite-only and cannot be used when "
+            "DATABASE_URL is configured. Use SQLAlchemy Core access helpers "
+            "instead."
+        )
     db_path = _resolve_db_path(db_path)
     db_path.parent.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(db_path)
@@ -62,11 +69,9 @@ def get_connection(db_path: Path | None = None) -> Iterator[sqlite3.Connection]:
 def initialize_database(conn: sqlite3.Connection) -> None:
     """Create the required tables via SQLAlchemy Core metadata."""
     if get_database_url():
-        raise NotImplementedError(
-            "DATABASE_URL/Postgres support is planned, but SQLite is the only "
-            "implemented PrepLens database backend right now."
-        )
-    metadata.create_all(create_sqlite_engine(_resolve_db_path()))
+        metadata.create_all(get_engine())
+    else:
+        metadata.create_all(create_sqlite_engine(_resolve_db_path()))
 
 
 def insert_document(

@@ -3,6 +3,8 @@ from pathlib import Path
 import pytest
 
 from sqlalchemy import inspect
+from sqlalchemy.engine import make_url
+from sqlalchemy.exc import SQLAlchemyError
 
 import src.db as db
 from src.config import DEFAULT_SQLITE_DB_PATH
@@ -21,7 +23,7 @@ from src.database.access import (
     save_chunk_embedding,
     save_query_embedding,
 )
-from src.database.engine import get_engine
+from src.database.engine import get_engine, normalize_database_url
 from src.database.schema import metadata
 
 
@@ -213,8 +215,58 @@ def test_core_embedding_save_load_round_trip(isolated_db: Path) -> None:
     )
 
 
-def test_database_url_is_explicitly_not_implemented(monkeypatch) -> None:
-    monkeypatch.setenv("DATABASE_URL", "postgresql://example/preplens")
+def test_database_url_selects_postgres_engine(monkeypatch) -> None:
+    monkeypatch.setenv(
+        "DATABASE_URL",
+        "postgresql://preplens:secret@localhost:5432/preplens_test",
+    )
 
-    with pytest.raises(NotImplementedError, match="Postgres support is planned"):
-        get_engine()
+    engine = get_engine()
+
+    assert engine.url.drivername == "postgresql+psycopg"
+    assert engine.dialect.name == "postgresql"
+    assert engine.url.database == "preplens_test"
+    engine.dispose()
+
+
+@pytest.mark.parametrize(
+    ("configured_url", "expected_url"),
+    [
+        (
+            "postgresql://preplens:secret@localhost/preplens",
+            "postgresql+psycopg://preplens:***@localhost/preplens",
+        ),
+        (
+            "postgres://preplens:secret@localhost/preplens",
+            "postgresql+psycopg://preplens:***@localhost/preplens",
+        ),
+        (
+            "postgresql+psycopg://preplens:secret@localhost/preplens",
+            "postgresql+psycopg://preplens:***@localhost/preplens",
+        ),
+    ],
+)
+def test_database_url_postgres_formats_are_normalized(
+    configured_url: str,
+    expected_url: str,
+) -> None:
+    normalized_url = make_url(normalize_database_url(configured_url))
+
+    assert normalized_url.render_as_string(hide_password=True) == expected_url
+
+
+def test_database_url_schema_initialization_surfaces_clear_error(
+    monkeypatch,
+) -> None:
+    monkeypatch.setenv(
+        "DATABASE_URL",
+        "postgresql://preplens:secret@localhost:5432/preplens_test",
+    )
+
+    def fail_create_all(engine) -> None:
+        raise SQLAlchemyError("connection failed")
+
+    monkeypatch.setattr(metadata, "create_all", fail_create_all)
+
+    with pytest.raises(RuntimeError, match="Unable to initialize"):
+        initialize_schema()

@@ -27,8 +27,8 @@ PrepLens is structured so CLI commands call reusable service-layer workflows in
 
 - Python
 - SQLite
-- SQLAlchemy Core for database access, with SQLite as the current default
-  backend; Postgres support is planned.
+- SQLAlchemy Core for database access, with SQLite as the default backend and
+  Postgres available through `DATABASE_URL`
 - OpenAI API
 - OpenAI embeddings
 - NumPy
@@ -74,6 +74,54 @@ Then visit:
 
 http://127.0.0.1:8000/docs
 
+### Local Frontend Demo
+
+Start the backend:
+
+```bash
+python3 -m uvicorn src.api.app:app --reload
+```
+
+Start the React/Vite frontend:
+
+```bash
+cd frontend
+npm install
+npm run dev
+```
+
+Then open:
+
+http://localhost:5173
+
+`OPENAI_API_KEY` must be set in the backend environment for `/ask`.
+The frontend defaults to `http://127.0.0.1:8000`; set
+`VITE_API_BASE_URL` to point it at a different API URL.
+
+### Database Configuration
+
+By default, PrepLens uses SQLite at `data/preplens.db`.
+
+Override the SQLite file path with:
+
+```bash
+PREPLENS_DB_PATH=/path/to/preplens.db python3 main.py history
+```
+
+Use Postgres or another external SQLAlchemy-supported database by setting
+`DATABASE_URL`. For Postgres, PrepLens uses the synchronous `psycopg` driver:
+
+```bash
+DATABASE_URL=postgresql+psycopg://preplens:password@localhost:5432/preplens python3 -m uvicorn src.api.app:app --reload
+```
+
+Plain `postgresql://...` and `postgres://...` Postgres URLs are normalized to
+`postgresql+psycopg://...`.
+
+Schema initialization currently uses SQLAlchemy Core
+`metadata.create_all(...)`. Alembic migrations are planned later if the schema
+evolves.
+
 ### Docker
 
 Docker is an optional way to run the local FastAPI API. Normal local
@@ -105,8 +153,42 @@ docker run -p 8000:8000 -e OPENAI_API_KEY="your_api_key" preplens
 Visit http://127.0.0.1:8000/health or http://127.0.0.1:8000/docs.
 
 The local `data/preplens.db` file is not baked into the Docker image. For now,
-the container may create and use its own SQLite database; persistent
-storage will be handled later with volumes or Postgres.
+the single-container Docker command may create and use its own SQLite database.
+
+### Docker Compose with Postgres
+
+Docker Compose is optional and is meant for running the local FastAPI API with
+a local Postgres database. Normal non-Docker development still uses SQLite by
+default when `DATABASE_URL` is unset.
+
+```bash
+docker compose up --build
+```
+
+Then open:
+
+http://127.0.0.1:8000/docs
+
+Compose uses these local Postgres defaults:
+
+- database: `preplens`
+- user: `preplens`
+- password: `preplens`
+- port: `5432`
+
+Postgres data persists in the named Docker volume
+`preplens_postgres_data`. `OPENAI_API_KEY` is passed through from your local
+environment and is required for embeddings and answer generation:
+
+```bash
+OPENAI_API_KEY="your_api_key" docker compose up --build
+```
+
+Optional live smoke check after the stack is running:
+
+```bash
+python3 scripts/smoke_postgres.py
+```
 
 ### Tests
 
@@ -125,7 +207,5 @@ Near-term:
 
 Next architecture phase:
 
-- add persistent Docker storage
-- migrate to Postgres
 - use cloud object storage for uploaded notes
 - deploy the service
