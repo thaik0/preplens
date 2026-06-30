@@ -52,6 +52,37 @@ def insert_document_record(filename: str, filepath: str, file_type: str) -> int:
         return int(result.inserted_primary_key[0])
 
 
+def get_document_by_source_path(source_path: str) -> dict[str, Any] | None:
+    """Return the document stored for a source path, or None when missing."""
+    initialize_schema()
+    statement = (
+        select(
+            documents.c.id,
+            documents.c.filename,
+            documents.c.file_type,
+            documents.c.filepath,
+        )
+        .where(documents.c.filepath == source_path)
+        .order_by(documents.c.id)
+        .limit(1)
+    )
+    with get_engine().connect() as conn:
+        row = conn.execute(statement).mappings().first()
+    return None if row is None else dict(row)
+
+
+def document_exists_by_source_path(source_path: str) -> bool:
+    """Return whether a document already exists for a source path."""
+    initialize_schema()
+    statement = (
+        select(func.count().label("document_count"))
+        .select_from(documents)
+        .where(documents.c.filepath == source_path)
+    )
+    with get_engine().connect() as conn:
+        return int(conn.execute(statement).scalar_one()) > 0
+
+
 def insert_chunk_records(
     document_id: int, chunk_rows: list[dict[str, int | str]]
 ) -> None:

@@ -6,7 +6,7 @@ from src.database.access import get_document_with_chunks, list_documents_with_ch
 from src.ingest.ingest import ingest_folder
 
 
-def ingest_notes(folder: str) -> dict[str, int]:
+def ingest_notes(folder: str) -> dict[str, int | list[str]]:
     """Ingest supported note files through the existing ingestion module."""
     return ingest_folder(folder)
 
