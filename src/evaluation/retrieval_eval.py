@@ -7,9 +7,7 @@ from typing import Any
 from src.db import (
     get_all_chunks,
     get_chunks_without_embeddings,
-    get_connection,
     get_query_embeddings,
-    initialize_database,
 )
 from src.retrieval.embeddings import EMBEDDING_MODEL, semantic_search
 from src.retrieval.feedback_aware import feedback_search
@@ -69,9 +67,7 @@ def load_evaluation_questions(path: str | Path) -> list[dict[str, Any]]:
 
 def ensure_embeddings_available() -> None:
     """Require complete embedding coverage before semantic comparisons begin."""
-    with get_connection() as conn:
-        initialize_database(conn)
-        missing_chunks = get_chunks_without_embeddings(conn, EMBEDDING_MODEL)
+    missing_chunks = get_chunks_without_embeddings(None, EMBEDDING_MODEL)
 
     if missing_chunks:
         raise RuntimeError(
@@ -82,9 +78,7 @@ def ensure_embeddings_available() -> None:
 
 def ensure_query_embeddings_available() -> None:
     """Require logged query embeddings before feedback-aware evaluation."""
-    with get_connection() as conn:
-        initialize_database(conn)
-        query_embeddings = get_query_embeddings(conn, EMBEDDING_MODEL)
+    query_embeddings = get_query_embeddings(None, EMBEDDING_MODEL)
 
     if not query_embeddings:
         raise RuntimeError(
@@ -150,9 +144,7 @@ def evaluate_retrieval(
     questions = load_evaluation_questions(evaluation_path)
     # Hand-labeled relevant chunks provide a fixed target, allowing retrieval
     # quality to be measured before changing the system with a reranker.
-    with get_connection() as conn:
-        initialize_database(conn)
-        chunks = get_all_chunks(conn)
+    chunks = get_all_chunks(None)
 
     if not chunks:
         raise ValueError("No chunks found. Run: python3 main.py ingest notes/")

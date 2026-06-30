@@ -1,10 +1,8 @@
 """Hybrid retrieval that combines keyword matches with semantic similarity."""
 
-from src.db import (
-    get_all_chunks,
-    get_chunks_without_embeddings,
-    get_connection,
-    initialize_database,
+from src.database.access import (
+    list_all_chunks,
+    list_chunks_missing_embeddings,
 )
 from src.retrieval.embeddings import (
     EMBEDDING_MODEL,
@@ -44,18 +42,14 @@ def hybrid_search(
     if limit <= 0:
         raise ValueError("limit must be greater than 0.")
 
-    with get_connection() as conn:
-        initialize_database(conn)
-        chunks = get_all_chunks(conn)
-        missing_embeddings = get_chunks_without_embeddings(conn, model)
-
-        if missing_embeddings:
-            raise RuntimeError(
-                f"Embeddings are missing for {len(missing_embeddings)} chunks. "
-                "Run: python3 main.py embed-chunks"
-            )
-
-        stored_embeddings = load_embeddings(conn, model)
+    chunks = list_all_chunks()
+    missing_embeddings = list_chunks_missing_embeddings(model)
+    if missing_embeddings:
+        raise RuntimeError(
+            f"Embeddings are missing for {len(missing_embeddings)} chunks. "
+            "Run: python3 main.py embed-chunks"
+        )
+    stored_embeddings = load_embeddings(None, model)
 
     if not chunks:
         return []

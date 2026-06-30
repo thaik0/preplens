@@ -2,15 +2,15 @@
 
 from typing import Any
 
+from src.database.access import get_query_details, list_recent_queries
 from src.generation.answer import get_cited_chunk_ids
-from src.logging.query_log import get_query_details, get_recent_queries
 from src.services.search_service import build_preview
 
 
 def list_query_history(limit: int = 10) -> dict[str, Any]:
     """Return recent saved ask queries in API-friendly form."""
     queries = []
-    for query in get_recent_queries(limit=limit):
+    for query in list_recent_queries(limit=limit):
         queries.append(
             {
                 "id": int(query["id"]),

@@ -2,7 +2,7 @@
 
 from typing import Any
 
-from src.db import get_connection, initialize_database
+from src.database.access import get_document_with_chunks, list_documents_with_chunk_counts
 from src.ingest.ingest import ingest_folder
 
 
@@ -13,18 +13,6 @@ def ingest_notes(folder: str) -> dict[str, int]:
 
 def list_documents() -> dict[str, Any]:
     """Return ingested documents with chunk counts."""
-    with get_connection() as conn:
-        initialize_database(conn)
-        rows = conn.execute(
-            """
-            SELECT d.id, d.filename, d.file_type, d.filepath, COUNT(c.id) AS chunk_count
-            FROM documents d
-            LEFT JOIN chunks c ON c.document_id = d.id
-            GROUP BY d.id
-            ORDER BY d.id
-            """
-        ).fetchall()
-
     documents = [
         {
             "id": int(row["id"]),
@@ -33,37 +21,18 @@ def list_documents() -> dict[str, Any]:
             "filepath": str(row["filepath"]),
             "chunk_count": int(row["chunk_count"]),
         }
-        for row in rows
+        for row in list_documents_with_chunk_counts()
     ]
     return {"documents": documents}
 
 
 def get_document_chunks(document_id: int) -> dict[str, Any] | None:
     """Return one document and its chunks for inspection."""
-    with get_connection() as conn:
-        initialize_database(conn)
-        document = conn.execute(
-            """
-            SELECT id, filename, filepath
-            FROM documents
-            WHERE id = ?
-            """,
-            (document_id,),
-        ).fetchone()
+    report = get_document_with_chunks(document_id)
+    if report is None:
+        return None
 
-        if document is None:
-            return None
-
-        rows = conn.execute(
-            """
-            SELECT chunk_index, text, start_char, end_char
-            FROM chunks
-            WHERE document_id = ?
-            ORDER BY chunk_index
-            """,
-            (document_id,),
-        ).fetchall()
-
+    document = report["document"]
     return {
         "document": {
             "id": int(document["id"]),
@@ -77,6 +46,6 @@ def get_document_chunks(document_id: int) -> dict[str, Any] | None:
                 "start_char": int(row["start_char"]),
                 "end_char": int(row["end_char"]),
             }
-            for row in rows
+            for row in report["chunks"]
         ],
     }

@@ -27,6 +27,8 @@ PrepLens is structured so CLI commands call reusable service-layer workflows in
 
 - Python
 - SQLite
+- SQLAlchemy Core for database access, with SQLite as the current default
+  backend; Postgres support is planned.
 - OpenAI API
 - OpenAI embeddings
 - NumPy

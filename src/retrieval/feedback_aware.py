@@ -1,6 +1,6 @@
 """Feedback-aware retrieval built on top of hybrid candidate ranking."""
 
-from src.db import get_connection, get_feedback_for_queries, initialize_database
+from src.database.access import list_feedback_for_queries
 from src.retrieval.embeddings import (
     EMBEDDING_MODEL,
     cosine_similarity,
@@ -40,9 +40,7 @@ def feedback_search(
     if gamma < 0:
         raise ValueError("gamma must be greater than or equal to 0.")
 
-    with get_connection() as conn:
-        initialize_database(conn)
-        stored_query_embeddings = load_query_embeddings(conn, model)
+    stored_query_embeddings = load_query_embeddings(None, model)
 
     if not stored_query_embeddings:
         raise RuntimeError(
@@ -95,9 +93,7 @@ def feedback_search(
     candidate_chunk_ids = set(feedback_scores)
     feedback_labels_used = 0
 
-    with get_connection() as conn:
-        initialize_database(conn)
-        feedback_rows = get_feedback_for_queries(conn, similar_query_ids)
+    feedback_rows = list_feedback_for_queries(similar_query_ids)
 
     for row in feedback_rows:
         chunk_id = int(row["chunk_id"])

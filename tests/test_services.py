@@ -1,6 +1,6 @@
 from pathlib import Path
 
-from src.db import get_connection, initialize_database
+from src.logging.query_log import log_ask_run
 from src.services.feedback_service import (
     add_source_feedback,
     get_feedback_summary_report,
@@ -64,28 +64,23 @@ def test_add_feedback_uses_controlled_query_and_chunk(
     )
     ingest_notes(str(notes_dir))
 
-    with get_connection() as conn:
-        initialize_database(conn)
-        query_cursor = conn.execute(
-            """
-            INSERT INTO queries (query_text, retrieval_method, alpha, top_k, model)
-            VALUES (?, ?, ?, ?, ?)
-            """,
-            ("how do I detect a cycle?", "hybrid", 0.5, 1, "test-model"),
-        )
-        query_id = int(query_cursor.lastrowid)
-        conn.execute(
-            """
-            INSERT INTO retrieval_results (
-                query_id, chunk_id, "rank", keyword_score,
-                normalized_keyword_score, semantic_score,
-                normalized_semantic_score, hybrid_score, was_cited
-            )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """,
-            (query_id, 1, 1, 1.0, 1.0, 0.8, 0.8, 0.9, 1),
-        )
-        conn.commit()
+    query_id = log_ask_run(
+        "how do I detect a cycle?",
+        alpha=0.5,
+        top_k=1,
+        model="test-model",
+        answer_text="Use slow and fast pointers. [chunk 1]",
+        results=[
+            {
+                "chunk_id": 1,
+                "keyword_score": 1.0,
+                "normalized_keyword_score": 1.0,
+                "semantic_score": 0.8,
+                "normalized_semantic_score": 0.8,
+                "hybrid_score": 0.9,
+            }
+        ],
+    )
 
     feedback = add_source_feedback(
         query_id,

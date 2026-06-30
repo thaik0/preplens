@@ -2,7 +2,7 @@
 
 from typing import Any
 
-from src.db import get_all_chunks, get_connection, initialize_database
+from src.database.access import list_all_chunks
 from src.retrieval.embeddings import EMBEDDING_MODEL, semantic_search
 from src.retrieval.feedback_aware import feedback_search as feedback_aware_search
 from src.retrieval.hybrid import hybrid_search
@@ -30,9 +30,7 @@ def _base_result(rank: int, result: dict[str, Any]) -> dict[str, Any]:
 
 def keyword_search(query: str, limit: int = 5) -> dict[str, Any]:
     """Run keyword retrieval and return structured results."""
-    with get_connection() as conn:
-        initialize_database(conn)
-        chunks = get_all_chunks(conn)
+    chunks = list_all_chunks()
 
     if not chunks:
         return {"query": query, "method": "keyword", "results": []}
