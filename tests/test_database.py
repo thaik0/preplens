@@ -9,6 +9,8 @@ from sqlalchemy.exc import SQLAlchemyError
 import src.db as db
 from src.config import DEFAULT_SQLITE_DB_PATH
 from src.database.access import (
+    document_exists_by_source_path,
+    get_document_by_source_path,
     get_document_with_chunks,
     get_query_details,
     initialize_schema,
@@ -118,6 +120,23 @@ def test_core_ingestion_inserts_document_and_chunks(isolated_db: Path) -> None:
     ]
     assert document is not None
     assert document["chunks"][0]["text"] == "Use slow and fast pointers."
+
+
+def test_document_source_path_lookup_helpers(isolated_db: Path) -> None:
+    document_id = insert_document_record("graphs.md", "notes/graphs.md", "md")
+
+    document = get_document_by_source_path("notes/graphs.md")
+
+    assert isolated_db.exists()
+    assert document == {
+        "id": document_id,
+        "filename": "graphs.md",
+        "file_type": "md",
+        "filepath": "notes/graphs.md",
+    }
+    assert document_exists_by_source_path("notes/graphs.md") is True
+    assert get_document_by_source_path("notes/missing.md") is None
+    assert document_exists_by_source_path("notes/missing.md") is False
 
 
 def test_core_ask_run_logging_round_trip(isolated_db: Path) -> None:

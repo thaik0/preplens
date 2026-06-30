@@ -678,8 +678,12 @@ def main() -> int:
             result = ingest_notes(args.folder)
             print(
                 f"Ingested {result['document_count']} documents "
-                f"and {result['chunk_count']} chunks."
+                f"({result['chunk_count']} chunks created)."
             )
+            print(f"Skipped {result['skipped_count']} already ingested files.")
+            if result["skipped_files"]:
+                for skipped_file in result["skipped_files"]:
+                    print(f"  - {skipped_file}")
             return 0
 
         if args.command == "list-docs":
