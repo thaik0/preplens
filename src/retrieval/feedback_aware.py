@@ -8,6 +8,7 @@ from src.retrieval.embeddings import (
     load_query_embeddings,
 )
 from src.retrieval.hybrid import hybrid_search
+from src.retrieval.query_normalization import normalize_retrieval_query
 
 
 FEEDBACK_LABEL_VALUES = {
@@ -63,7 +64,8 @@ def feedback_search(
             },
         }
 
-    query_embedding = generate_embedding(query, model)
+    normalized_query = normalize_retrieval_query(query) or query.strip().lower()
+    query_embedding = generate_embedding(normalized_query, model)
     similar_queries = []
     for stored in stored_query_embeddings:
         embedding = stored["embedding"]

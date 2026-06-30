@@ -57,7 +57,7 @@ def show_query_details(query_id: int) -> dict[str, Any] | None:
             "model": str(query["model"]),
             "created_at": str(query["created_at"]),
             "answer_text": answer_text,
-            "cited_chunk_ids": sorted(get_cited_chunk_ids(answer_text)),
+            "cited_chunk_ids": sorted(get_cited_chunk_ids(answer_text, retrieved_chunks)),
         },
         "retrieved_chunks": retrieved_chunks,
     }

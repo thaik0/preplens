@@ -67,6 +67,29 @@ Mental rule:
 
 ---
 
+## DFS on an Adjacency List
+
+Use DFS when you want to explore as far as possible along one path before backtracking.
+
+For an adjacency list, each node maps to its neighbors.
+
+```python
+
+visited = set()
+
+def dfs(node):
+
+    if node in visited:
+
+        return
+
+    visited.add(node)
+
+    for nei in graph[node]:
+
+        dfs(nei)
+```
+
 ## 1. Number of Islands
 
 Pattern: grid DFS/BFS
