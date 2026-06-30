@@ -285,7 +285,7 @@ def log_ask_run_record(
     from src.generation.answer import get_cited_chunk_ids
 
     initialize_schema()
-    cited_chunk_ids = get_cited_chunk_ids(answer_text)
+    cited_chunk_ids = get_cited_chunk_ids(answer_text, results)
 
     with get_engine().begin() as conn:
         query_result = conn.execute(

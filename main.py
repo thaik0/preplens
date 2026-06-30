@@ -30,6 +30,15 @@ from src.services.search_service import (
     keyword_search,
     semantic_chunk_search,
 )
+from src.retrieval.query_normalization import normalize_retrieval_query
+
+
+def _print_normalized_query(query: str) -> None:
+    normalized_query = normalize_retrieval_query(query)
+    if normalized_query and normalized_query != query.lower():
+        print(f"Original query: {query}")
+        print(f"Normalized retrieval query: {normalized_query}")
+        print()
 
 
 def list_docs() -> int:
@@ -83,6 +92,7 @@ def search(query: str) -> int:
     """Rank stored chunks for a keyword query and print the top results."""
     report = keyword_search(query)
     results = report["results"]
+    _print_normalized_query(query)
     if not results:
         print(f'No matching chunks found for: "{query}"')
         return 0
@@ -123,6 +133,7 @@ def run_semantic_search(query: str) -> int:
     """Print the most semantically similar stored chunks for a query."""
     report = semantic_chunk_search(query)
     results = report["results"]
+    _print_normalized_query(query)
     if not results:
         print("No chunk embeddings found. Run: python3 main.py embed-chunks")
         return 0
@@ -163,6 +174,7 @@ def run_hybrid_search(query: str, alpha: float) -> int:
     """Print the top chunks ranked by combined keyword and semantic scores."""
     report = hybrid_chunk_search(query, alpha=alpha)
     results = report["results"]
+    _print_normalized_query(query)
     if not results:
         print("No chunks found. Run: python3 main.py ingest notes/")
         return 0
@@ -206,6 +218,7 @@ def run_feedback_search(
     )
     results = report["results"]
     diagnostics = report["diagnostics"]
+    _print_normalized_query(query)
 
     if not diagnostics["used_feedback"]:
         print("No similar feedback found; results fall back to hybrid ranking.")

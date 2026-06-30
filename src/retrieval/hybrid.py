@@ -11,6 +11,7 @@ from src.retrieval.embeddings import (
     load_embeddings,
 )
 from src.retrieval.keyword import score_chunks
+from src.retrieval.query_normalization import normalize_retrieval_query
 
 
 def normalize_scores(scores: dict[int, float]) -> dict[int, float]:
@@ -54,7 +55,8 @@ def hybrid_search(
     if not chunks:
         return []
 
-    keyword_results = score_chunks(query, chunks, limit=len(chunks))
+    normalized_query = normalize_retrieval_query(query) or query.strip().lower()
+    keyword_results = score_chunks(normalized_query, chunks, limit=len(chunks))
     keyword_scores = {
         int(result["chunk_id"]): float(result["score"])
         for result in keyword_results
@@ -62,7 +64,7 @@ def hybrid_search(
     for chunk in chunks:
         keyword_scores.setdefault(int(chunk["id"]), 0.0)
 
-    query_embedding = generate_embedding(query, model)
+    query_embedding = generate_embedding(normalized_query, model)
     semantic_scores = {
         int(stored["chunk_id"]): cosine_similarity(
             query_embedding, stored["embedding"]

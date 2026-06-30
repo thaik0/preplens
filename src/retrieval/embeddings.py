@@ -20,6 +20,7 @@ from src.database.access import (
     save_chunk_embedding,
     save_query_embedding,
 )
+from src.retrieval.query_normalization import normalize_retrieval_query
 
 
 EMBEDDING_MODEL = "text-embedding-3-small"
@@ -204,7 +205,8 @@ def semantic_search(
     if not stored_embeddings:
         return []
 
-    query_embedding = generate_embedding(query, model)
+    normalized_query = normalize_retrieval_query(query) or query.strip().lower()
+    query_embedding = generate_embedding(normalized_query, model)
     results: list[dict[str, int | str | float]] = []
     for stored in stored_embeddings:
         embedding = stored["embedding"]
@@ -242,7 +244,8 @@ def similar_queries(
     # Comparing a new query to past query embeddings is the raw material for
     # future feedback-aware retrieval: similar past questions can reveal which
     # retrieved chunks users marked helpful or wrong_source.
-    query_embedding = generate_embedding(query, model)
+    normalized_query = normalize_retrieval_query(query) or query.strip().lower()
+    query_embedding = generate_embedding(normalized_query, model)
     results: list[dict[str, int | str | float]] = []
     for stored in stored_embeddings:
         embedding = stored["embedding"]

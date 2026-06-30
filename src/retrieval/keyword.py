@@ -4,6 +4,8 @@ from collections import Counter
 import re
 from typing import Mapping
 
+from src.retrieval.query_normalization import normalize_retrieval_query
+
 
 STOPWORDS = {
     "a",
@@ -47,7 +49,7 @@ def score_chunks(
     if limit <= 0:
         raise ValueError("limit must be greater than 0.")
 
-    query_terms = set(tokenize(query))
+    query_terms = set(tokenize(normalize_retrieval_query(query)))
     if not query_terms:
         raise ValueError("Search query must include at least one keyword.")
 
