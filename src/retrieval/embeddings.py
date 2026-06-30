@@ -8,20 +8,17 @@ by meaning without generating an answer.
 import json
 import math
 import os
-import sqlite3
 from typing import Any
 
-from src.db import (
-    count_chunks,
-    count_queries,
-    get_chunk_embeddings,
-    get_chunks_without_embeddings,
-    get_connection,
-    get_queries_without_embeddings,
-    get_query_embeddings,
-    initialize_database,
-    insert_chunk_embedding,
-    insert_query_embedding,
+from src.database.access import (
+    count_chunk_records,
+    count_query_records,
+    list_chunk_embeddings,
+    list_chunks_missing_embeddings,
+    list_queries_missing_embeddings,
+    list_query_embeddings,
+    save_chunk_embedding,
+    save_query_embedding,
 )
 
 
@@ -85,25 +82,25 @@ def cosine_similarity(vector_a: list[float], vector_b: list[float]) -> float:
 
 
 def store_embedding(
-    conn: sqlite3.Connection, chunk_id: int, model: str, embedding: list[float]
+    conn: Any, chunk_id: int, model: str, embedding: list[float]
 ) -> None:
-    """Serialize an embedding as JSON before saving it in SQLite."""
-    insert_chunk_embedding(conn, chunk_id, model, json.dumps(embedding))
+    """Serialize an embedding as JSON before saving it."""
+    save_chunk_embedding(chunk_id, model, json.dumps(embedding))
 
 
 def store_query_embedding(
-    conn: sqlite3.Connection, query_id: int, model: str, embedding: list[float]
+    conn: Any, query_id: int, model: str, embedding: list[float]
 ) -> None:
-    """Serialize a logged query embedding before saving it in SQLite."""
-    insert_query_embedding(conn, query_id, model, json.dumps(embedding))
+    """Serialize a logged query embedding before saving it."""
+    save_query_embedding(query_id, model, json.dumps(embedding))
 
 
 def load_embeddings(
-    conn: sqlite3.Connection, model: str
+    conn: Any, model: str
 ) -> list[dict[str, int | str | list[float]]]:
     """Load stored JSON vectors with the chunk fields needed for search output."""
     embeddings: list[dict[str, int | str | list[float]]] = []
-    for row in get_chunk_embeddings(conn, model):
+    for row in list_chunk_embeddings(model):
         try:
             embedding = json.loads(str(row["embedding_json"]))
         except json.JSONDecodeError as exc:
@@ -131,11 +128,11 @@ def load_embeddings(
 
 
 def load_query_embeddings(
-    conn: sqlite3.Connection, model: str
+    conn: Any, model: str
 ) -> list[dict[str, int | str | list[float]]]:
     """Load stored JSON vectors with query fields needed for inspection."""
     embeddings: list[dict[str, int | str | list[float]]] = []
-    for row in get_query_embeddings(conn, model):
+    for row in list_query_embeddings(model):
         try:
             embedding = json.loads(str(row["embedding_json"]))
         except json.JSONDecodeError as exc:
@@ -163,42 +160,34 @@ def load_query_embeddings(
 
 def embed_stored_chunks(model: str = EMBEDDING_MODEL) -> dict[str, int]:
     """Create and store embeddings for chunks that are missing this model."""
-    with get_connection() as conn:
-        initialize_database(conn)
-        missing_chunks = get_chunks_without_embeddings(conn, model)
-        skipped_count = count_chunks(conn) - len(missing_chunks)
+    missing_chunks = list_chunks_missing_embeddings(model)
+    skipped_count = count_chunk_records() - len(missing_chunks)
 
-        if not missing_chunks:
-            return {"created_count": 0, "skipped_count": skipped_count}
+    if not missing_chunks:
+        return {"created_count": 0, "skipped_count": skipped_count}
 
-        client = create_openai_client()
-        for chunk in missing_chunks:
-            embedding = generate_embedding(str(chunk["text"]), model, client)
-            store_embedding(conn, int(chunk["id"]), model, embedding)
-
-        conn.commit()
+    client = create_openai_client()
+    for chunk in missing_chunks:
+        embedding = generate_embedding(str(chunk["text"]), model, client)
+        store_embedding(None, int(chunk["id"]), model, embedding)
 
     return {"created_count": len(missing_chunks), "skipped_count": skipped_count}
 
 
 def embed_stored_queries(model: str = EMBEDDING_MODEL) -> dict[str, int]:
     """Create and store embeddings for logged queries missing this model."""
-    with get_connection() as conn:
-        initialize_database(conn)
-        missing_queries = get_queries_without_embeddings(conn, model)
-        skipped_count = count_queries(conn) - len(missing_queries)
+    missing_queries = list_queries_missing_embeddings(model)
+    skipped_count = count_query_records() - len(missing_queries)
 
-        if not missing_queries:
-            return {"created_count": 0, "skipped_count": skipped_count}
+    if not missing_queries:
+        return {"created_count": 0, "skipped_count": skipped_count}
 
-        # Already embedded queries are skipped because embeddings are stable for
-        # a fixed text/model pair, and skipping avoids repeated API cost.
-        client = create_openai_client()
-        for query in missing_queries:
-            embedding = generate_embedding(str(query["query_text"]), model, client)
-            store_query_embedding(conn, int(query["id"]), model, embedding)
-
-        conn.commit()
+    # Already embedded queries are skipped because embeddings are stable for
+    # a fixed text/model pair, and skipping avoids repeated API cost.
+    client = create_openai_client()
+    for query in missing_queries:
+        embedding = generate_embedding(str(query["query_text"]), model, client)
+        store_query_embedding(None, int(query["id"]), model, embedding)
 
     return {"created_count": len(missing_queries), "skipped_count": skipped_count}
 
@@ -210,9 +199,7 @@ def semantic_search(
     if limit <= 0:
         raise ValueError("limit must be greater than 0.")
 
-    with get_connection() as conn:
-        initialize_database(conn)
-        stored_embeddings = load_embeddings(conn, model)
+    stored_embeddings = load_embeddings(None, model)
 
     if not stored_embeddings:
         return []
@@ -247,9 +234,7 @@ def similar_queries(
     if limit <= 0:
         raise ValueError("limit must be greater than 0.")
 
-    with get_connection() as conn:
-        initialize_database(conn)
-        stored_embeddings = load_query_embeddings(conn, model)
+    stored_embeddings = load_query_embeddings(None, model)
 
     if not stored_embeddings:
         return []

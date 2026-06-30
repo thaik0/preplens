@@ -1,7 +1,7 @@
 """Interactive helpers for collecting source feedback after ask runs."""
 
-from collections.abc import Callable
-import sqlite3
+from collections.abc import Callable, Mapping
+from typing import Any
 
 from src.logging.query_log import add_feedback
 
@@ -36,7 +36,7 @@ def parse_feedback_input(raw_value: str) -> tuple[str | None, str | None]:
 
 def collect_source_feedback(
     query_id: int,
-    retrieved_chunks: list[sqlite3.Row],
+    retrieved_chunks: list[Mapping[str, Any]],
     preview_builder: Callable[[str], str],
     input_func: Callable[[str], str] = input,
     output_func: Callable[[str], None] = print,

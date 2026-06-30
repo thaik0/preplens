@@ -1,8 +1,7 @@
-"""Legacy sqlite3 helpers for source documents and retrieval internals.
+"""Legacy sqlite3 compatibility helpers for PrepLens.
 
-SQLAlchemy Core now owns schema creation and the newer access boundary. These
-helpers remain for lower-level ingestion, embedding, and retrieval code until a
-later cleanup can migrate those paths without changing behavior.
+SQLAlchemy Core is now the preferred database access path. This module keeps
+older imports working while remaining sqlite3 usage is reduced before Postgres.
 """
 
 from collections.abc import Iterator
@@ -10,6 +9,7 @@ from contextlib import contextmanager
 import os
 import sqlite3
 from pathlib import Path
+from typing import Any
 
 from src.config import (
     DEFAULT_SQLITE_DB_PATH,
@@ -18,6 +18,20 @@ from src.config import (
     get_sqlite_db_path,
 )
 from src.database.engine import create_sqlite_engine
+from src.database.access import (
+    count_chunk_records,
+    count_query_records,
+    insert_chunk_records,
+    insert_document_record,
+    list_all_chunks,
+    list_chunk_embeddings,
+    list_chunks_missing_embeddings,
+    list_feedback_for_queries,
+    list_queries_missing_embeddings,
+    list_query_embeddings,
+    save_chunk_embedding,
+    save_query_embedding,
+)
 from src.database.schema import metadata
 
 
@@ -56,173 +70,78 @@ def initialize_database(conn: sqlite3.Connection) -> None:
 
 
 def insert_document(
-    conn: sqlite3.Connection, filename: str, filepath: str, file_type: str
+    conn: Any, filename: str, filepath: str, file_type: str
 ) -> int:
     """Insert one document row and return its generated id."""
-    cursor = conn.execute(
-        """
-        INSERT INTO documents (filename, filepath, file_type)
-        VALUES (?, ?, ?)
-        """,
-        (filename, filepath, file_type),
-    )
-    return int(cursor.lastrowid)
+    return insert_document_record(filename, filepath, file_type)
 
 
 def insert_chunks(
-    conn: sqlite3.Connection, document_id: int, chunks: list[dict[str, int | str]]
+    conn: Any, document_id: int, chunks: list[dict[str, int | str]]
 ) -> None:
     """Insert all chunks for a document."""
-    conn.executemany(
-        """
-        INSERT INTO chunks (document_id, chunk_index, text, start_char, end_char)
-        VALUES (?, ?, ?, ?, ?)
-        """,
-        [
-            (
-                document_id,
-                chunk["chunk_index"],
-                chunk["text"],
-                chunk["start_char"],
-                chunk["end_char"],
-            )
-            for chunk in chunks
-        ],
-    )
+    insert_chunk_records(document_id, chunks)
 
 
-def get_all_chunks(conn: sqlite3.Connection) -> list[sqlite3.Row]:
+def get_all_chunks(conn: Any) -> list[dict]:
     """Return every stored chunk with the filename needed for search results."""
-    return conn.execute(
-        """
-        SELECT c.id, c.chunk_index, c.text, d.filename
-        FROM chunks c
-        JOIN documents d ON d.id = c.document_id
-        ORDER BY c.id
-        """
-    ).fetchall()
+    return list_all_chunks()
 
 
 def get_chunks_without_embeddings(
-    conn: sqlite3.Connection, model: str
-) -> list[sqlite3.Row]:
+    conn: Any, model: str
+) -> list[dict]:
     """Return chunks that do not yet have an embedding for the given model."""
-    return conn.execute(
-        """
-        SELECT c.id, c.text
-        FROM chunks c
-        LEFT JOIN chunk_embeddings e
-            ON e.chunk_id = c.id AND e.model = ?
-        WHERE e.id IS NULL
-        ORDER BY c.id
-        """,
-        (model,),
-    ).fetchall()
+    return list_chunks_missing_embeddings(model)
 
 
-def count_chunks(conn: sqlite3.Connection) -> int:
+def count_chunks(conn: Any) -> int:
     """Return the number of stored chunks."""
-    row = conn.execute("SELECT COUNT(*) AS chunk_count FROM chunks").fetchone()
-    return int(row["chunk_count"])
+    return count_chunk_records()
 
 
 def insert_chunk_embedding(
-    conn: sqlite3.Connection, chunk_id: int, model: str, embedding_json: str
+    conn: Any, chunk_id: int, model: str, embedding_json: str
 ) -> None:
     """Store one serialized embedding for a chunk and model."""
-    conn.execute(
-        """
-        INSERT INTO chunk_embeddings (chunk_id, model, embedding_json)
-        VALUES (?, ?, ?)
-        """,
-        (chunk_id, model, embedding_json),
-    )
+    save_chunk_embedding(chunk_id, model, embedding_json)
 
 
 def get_chunk_embeddings(
-    conn: sqlite3.Connection, model: str
-) -> list[sqlite3.Row]:
+    conn: Any, model: str
+) -> list[dict]:
     """Return stored embeddings together with the chunk metadata for display."""
-    return conn.execute(
-        """
-        SELECT c.id AS chunk_id, c.chunk_index, c.text, d.filename,
-               e.embedding_json
-        FROM chunk_embeddings e
-        JOIN chunks c ON c.id = e.chunk_id
-        JOIN documents d ON d.id = c.document_id
-        WHERE e.model = ?
-        ORDER BY c.id
-        """,
-        (model,),
-    ).fetchall()
+    return list_chunk_embeddings(model)
 
 
 def get_queries_without_embeddings(
-    conn: sqlite3.Connection, model: str
-) -> list[sqlite3.Row]:
+    conn: Any, model: str
+) -> list[dict]:
     """Return logged queries that do not yet have an embedding for this model."""
-    return conn.execute(
-        """
-        SELECT q.id, q.query_text
-        FROM queries q
-        LEFT JOIN query_embeddings e
-            ON e.query_id = q.id AND e.model = ?
-        WHERE e.id IS NULL
-        ORDER BY q.id
-        """,
-        (model,),
-    ).fetchall()
+    return list_queries_missing_embeddings(model)
 
 
-def count_queries(conn: sqlite3.Connection) -> int:
+def count_queries(conn: Any) -> int:
     """Return the number of logged ask queries."""
-    row = conn.execute("SELECT COUNT(*) AS query_count FROM queries").fetchone()
-    return int(row["query_count"])
+    return count_query_records()
 
 
 def insert_query_embedding(
-    conn: sqlite3.Connection, query_id: int, model: str, embedding_json: str
+    conn: Any, query_id: int, model: str, embedding_json: str
 ) -> None:
     """Store one serialized embedding for a logged query and model."""
-    conn.execute(
-        """
-        INSERT INTO query_embeddings (query_id, model, embedding_json)
-        VALUES (?, ?, ?)
-        """,
-        (query_id, model, embedding_json),
-    )
+    save_query_embedding(query_id, model, embedding_json)
 
 
 def get_query_embeddings(
-    conn: sqlite3.Connection, model: str
-) -> list[sqlite3.Row]:
+    conn: Any, model: str
+) -> list[dict]:
     """Return stored query embeddings with query metadata for similarity search."""
-    return conn.execute(
-        """
-        SELECT q.id AS query_id, q.query_text, q.created_at, e.embedding_json
-        FROM query_embeddings e
-        JOIN queries q ON q.id = e.query_id
-        WHERE e.model = ?
-        ORDER BY q.id
-        """,
-        (model,),
-    ).fetchall()
+    return list_query_embeddings(model)
 
 
 def get_feedback_for_queries(
-    conn: sqlite3.Connection, query_ids: list[int]
-) -> list[sqlite3.Row]:
+    conn: Any, query_ids: list[int]
+) -> list[dict]:
     """Return feedback labels attached to the provided logged query IDs."""
-    if not query_ids:
-        return []
-
-    placeholders = ", ".join("?" for _ in query_ids)
-    return conn.execute(
-        f"""
-        SELECT query_id, chunk_id, feedback_type
-        FROM feedback
-        WHERE query_id IN ({placeholders})
-        ORDER BY query_id, id
-        """,
-        query_ids,
-    ).fetchall()
+    return list_feedback_for_queries(query_ids)

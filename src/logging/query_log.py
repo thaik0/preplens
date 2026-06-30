@@ -1,4 +1,4 @@
-"""SQLite persistence and inspection helpers for successful ask runs."""
+"""Persistence and inspection helpers for successful ask runs."""
 
 from src.database.access import (
     FEEDBACK_TYPES,
@@ -6,9 +6,8 @@ from src.database.access import (
     get_feedback_summary as get_feedback_summary_record,
     get_query_details as get_query_details_record,
     list_recent_queries,
+    log_ask_run_record,
 )
-from src.db import get_connection, initialize_database
-from src.generation.answer import get_cited_chunk_ids
 
 
 def log_ask_run(
@@ -20,60 +19,7 @@ def log_ask_run(
     results: list[dict[str, int | str | float]],
 ) -> int:
     """Save one completed ask run and return its query id."""
-    # Logging establishes an inspectable baseline before feedback is added, so
-    # future feedback can be connected to the exact question and answer.
-    cited_chunk_ids = get_cited_chunk_ids(answer_text)
-
-    with get_connection() as conn:
-        initialize_database(conn)
-        query_cursor = conn.execute(
-            """
-            INSERT INTO queries (query_text, retrieval_method, alpha, top_k, model)
-            VALUES (?, ?, ?, ?, ?)
-            """,
-            (query_text, "hybrid", alpha, top_k, model),
-        )
-        query_id = int(query_cursor.lastrowid)
-
-        conn.execute(
-            """
-            INSERT INTO answers (query_id, answer_text)
-            VALUES (?, ?)
-            """,
-            (query_id, answer_text),
-        )
-
-        # Store this retrieval snapshot per query because future embeddings or
-        # scoring changes could rank the same chunks differently.
-        # was_cited is separate from retrieval: every row was retrieved, while
-        # this flag records the subset the model used in its answer.
-        conn.executemany(
-            """
-            INSERT INTO retrieval_results (
-                query_id, chunk_id, "rank", keyword_score,
-                normalized_keyword_score, semantic_score,
-                normalized_semantic_score, hybrid_score, was_cited
-            )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """,
-            [
-                (
-                    query_id,
-                    int(result["chunk_id"]),
-                    rank,
-                    float(result["keyword_score"]),
-                    float(result["normalized_keyword_score"]),
-                    float(result["semantic_score"]),
-                    float(result["normalized_semantic_score"]),
-                    float(result["hybrid_score"]),
-                    1 if int(result["chunk_id"]) in cited_chunk_ids else 0,
-                )
-                for rank, result in enumerate(results, start=1)
-            ],
-        )
-        conn.commit()
-
-    return query_id
+    return log_ask_run_record(query_text, alpha, top_k, model, answer_text, results)
 
 
 def get_recent_queries(limit: int = 10) -> list[dict]:

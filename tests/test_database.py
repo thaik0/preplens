@@ -6,7 +6,21 @@ from sqlalchemy import inspect
 
 import src.db as db
 from src.config import DEFAULT_SQLITE_DB_PATH
-from src.database.access import initialize_schema
+from src.database.access import (
+    get_document_with_chunks,
+    get_query_details,
+    initialize_schema,
+    insert_chunk_records,
+    insert_document_record,
+    list_chunk_embeddings,
+    list_chunks_missing_embeddings,
+    list_documents_with_chunk_counts,
+    list_queries_missing_embeddings,
+    list_query_embeddings,
+    log_ask_run_record,
+    save_chunk_embedding,
+    save_query_embedding,
+)
 from src.database.engine import get_engine
 from src.database.schema import metadata
 
@@ -67,6 +81,136 @@ def test_legacy_initialize_database_honors_db_path_override(
 
     assert set(metadata.tables).issubset(table_names)
     assert db_path.exists()
+
+
+def test_core_ingestion_inserts_document_and_chunks(isolated_db: Path) -> None:
+    document_id = insert_document_record(
+        "linked_lists.md",
+        "notes/linked_lists.md",
+        "md",
+    )
+    insert_chunk_records(
+        document_id,
+        [
+            {
+                "chunk_index": 0,
+                "text": "Use slow and fast pointers.",
+                "start_char": 0,
+                "end_char": 27,
+            }
+        ],
+    )
+
+    documents = list_documents_with_chunk_counts()
+    document = get_document_with_chunks(document_id)
+
+    assert isolated_db.exists()
+    assert documents == [
+        {
+            "id": document_id,
+            "filename": "linked_lists.md",
+            "file_type": "md",
+            "filepath": "notes/linked_lists.md",
+            "chunk_count": 1,
+        }
+    ]
+    assert document is not None
+    assert document["chunks"][0]["text"] == "Use slow and fast pointers."
+
+
+def test_core_ask_run_logging_round_trip(isolated_db: Path) -> None:
+    document_id = insert_document_record("graphs.md", "notes/graphs.md", "md")
+    insert_chunk_records(
+        document_id,
+        [
+            {
+                "chunk_index": 0,
+                "text": "BFS explores level by level.",
+                "start_char": 0,
+                "end_char": 29,
+            }
+        ],
+    )
+
+    query_id = log_ask_run_record(
+        "what does bfs do?",
+        alpha=0.5,
+        top_k=1,
+        model="test-model",
+        answer_text="BFS explores by levels. [chunk 1]",
+        results=[
+            {
+                "chunk_id": 1,
+                "keyword_score": 2.0,
+                "normalized_keyword_score": 1.0,
+                "semantic_score": 0.75,
+                "normalized_semantic_score": 0.75,
+                "hybrid_score": 0.875,
+            }
+        ],
+    )
+
+    query, results = get_query_details(query_id)
+
+    assert isolated_db.exists()
+    assert query is not None
+    assert query["query_text"] == "what does bfs do?"
+    assert query["answer_text"] == "BFS explores by levels. [chunk 1]"
+    assert results[0]["chunk_id"] == 1
+    assert results[0]["rank"] == 1
+    assert results[0]["was_cited"] == 1
+
+
+def test_core_embedding_save_load_round_trip(isolated_db: Path) -> None:
+    document_id = insert_document_record("dp.md", "notes/dp.md", "md")
+    insert_chunk_records(
+        document_id,
+        [
+            {
+                "chunk_index": 0,
+                "text": "Memoization stores previous answers.",
+                "start_char": 0,
+                "end_char": 37,
+            }
+        ],
+    )
+    query_id = log_ask_run_record(
+        "what is memoization?",
+        alpha=0.5,
+        top_k=1,
+        model="test-model",
+        answer_text="Memoization stores answers. [chunk 1]",
+        results=[
+            {
+                "chunk_id": 1,
+                "keyword_score": 1.0,
+                "normalized_keyword_score": 1.0,
+                "semantic_score": 1.0,
+                "normalized_semantic_score": 1.0,
+                "hybrid_score": 1.0,
+            }
+        ],
+    )
+
+    assert list_chunks_missing_embeddings("test-embedding-model") == [
+        {"id": 1, "text": "Memoization stores previous answers."}
+    ]
+    assert list_queries_missing_embeddings("test-embedding-model") == [
+        {"id": query_id, "query_text": "what is memoization?"}
+    ]
+
+    save_chunk_embedding(1, "test-embedding-model", "[0.1, 0.2]")
+    save_query_embedding(query_id, "test-embedding-model", "[0.3, 0.4]")
+
+    assert isolated_db.exists()
+    assert list_chunks_missing_embeddings("test-embedding-model") == []
+    assert list_queries_missing_embeddings("test-embedding-model") == []
+    assert list_chunk_embeddings("test-embedding-model")[0]["embedding_json"] == (
+        "[0.1, 0.2]"
+    )
+    assert list_query_embeddings("test-embedding-model")[0]["embedding_json"] == (
+        "[0.3, 0.4]"
+    )
 
 
 def test_database_url_is_explicitly_not_implemented(monkeypatch) -> None:
