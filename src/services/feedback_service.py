@@ -2,7 +2,7 @@
 
 from typing import Any
 
-from src.logging.query_log import FEEDBACK_TYPES, add_feedback, get_feedback_summary
+from src.database.access import FEEDBACK_TYPES, add_feedback, get_feedback_summary
 
 
 def add_source_feedback(

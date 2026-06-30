@@ -1,20 +1,41 @@
-"""SQLite helpers for storing source documents and their text chunks."""
+"""Legacy sqlite3 helpers for source documents and retrieval internals.
+
+SQLAlchemy Core now owns schema creation and the newer access boundary. These
+helpers remain for lower-level ingestion, embedding, and retrieval code until a
+later cleanup can migrate those paths without changing behavior.
+"""
 
 from collections.abc import Iterator
 from contextlib import contextmanager
+import os
 import sqlite3
 from pathlib import Path
 
+from src.config import (
+    DEFAULT_SQLITE_DB_PATH,
+    PREPLENS_DB_PATH_ENV,
+    get_database_url,
+    get_sqlite_db_path,
+)
+from src.database.engine import create_sqlite_engine
+from src.database.schema import metadata
 
-DB_PATH = Path("data") / "preplens.db"
+
+DB_PATH = DEFAULT_SQLITE_DB_PATH
+
+
+def _resolve_db_path(db_path: Path | None = None) -> Path:
+    if db_path is not None:
+        return db_path
+    if os.getenv(PREPLENS_DB_PATH_ENV):
+        return get_sqlite_db_path()
+    return DB_PATH
 
 
 @contextmanager
 def get_connection(db_path: Path | None = None) -> Iterator[sqlite3.Connection]:
     """Open a SQLite connection for a block of work, then close it."""
-    if db_path is None:
-        db_path = DB_PATH
-
+    db_path = _resolve_db_path(db_path)
     db_path.parent.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(db_path)
     conn.row_factory = sqlite3.Row
@@ -25,121 +46,13 @@ def get_connection(db_path: Path | None = None) -> Iterator[sqlite3.Connection]:
 
 
 def initialize_database(conn: sqlite3.Connection) -> None:
-    """Create the required tables if they do not already exist."""
-    conn.execute(
-        """
-        CREATE TABLE IF NOT EXISTS documents (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            filename TEXT NOT NULL,
-            filepath TEXT NOT NULL,
-            file_type TEXT NOT NULL,
-            created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+    """Create the required tables via SQLAlchemy Core metadata."""
+    if get_database_url():
+        raise NotImplementedError(
+            "DATABASE_URL/Postgres support is planned, but SQLite is the only "
+            "implemented PrepLens database backend right now."
         )
-        """
-    )
-    conn.execute(
-        """
-        CREATE TABLE IF NOT EXISTS chunks (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            document_id INTEGER NOT NULL,
-            chunk_index INTEGER NOT NULL,
-            text TEXT NOT NULL,
-            start_char INTEGER NOT NULL,
-            end_char INTEGER NOT NULL,
-            FOREIGN KEY (document_id) REFERENCES documents (id)
-        )
-        """
-    )
-    # Embeddings live separately so a chunk can later be embedded by more than
-    # one model without duplicating the original source text.
-    conn.execute(
-        """
-        CREATE TABLE IF NOT EXISTS chunk_embeddings (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            chunk_id INTEGER NOT NULL,
-            model TEXT NOT NULL,
-            embedding_json TEXT NOT NULL,
-            created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-            FOREIGN KEY (chunk_id) REFERENCES chunks (id),
-            UNIQUE (chunk_id, model)
-        )
-        """
-    )
-    conn.execute(
-        """
-        CREATE TABLE IF NOT EXISTS queries (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            query_text TEXT NOT NULL,
-            retrieval_method TEXT NOT NULL,
-            alpha REAL NOT NULL,
-            top_k INTEGER NOT NULL,
-            model TEXT NOT NULL,
-            created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
-        )
-        """
-    )
-    # Query embeddings are stored separately from query text so future
-    # feedback-aware retrieval can compare new questions with past questions
-    # without changing the logged query records.
-    conn.execute(
-        """
-        CREATE TABLE IF NOT EXISTS query_embeddings (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            query_id INTEGER NOT NULL,
-            model TEXT NOT NULL,
-            embedding_json TEXT NOT NULL,
-            created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-            FOREIGN KEY (query_id) REFERENCES queries (id),
-            UNIQUE (query_id, model)
-        )
-        """
-    )
-    conn.execute(
-        """
-        CREATE TABLE IF NOT EXISTS answers (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            query_id INTEGER NOT NULL UNIQUE,
-            answer_text TEXT NOT NULL,
-            created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-            FOREIGN KEY (query_id) REFERENCES queries (id)
-        )
-        """
-    )
-    conn.execute(
-        """
-        CREATE TABLE IF NOT EXISTS retrieval_results (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            query_id INTEGER NOT NULL,
-            chunk_id INTEGER NOT NULL,
-            "rank" INTEGER NOT NULL,
-            keyword_score REAL NOT NULL,
-            normalized_keyword_score REAL NOT NULL,
-            semantic_score REAL NOT NULL,
-            normalized_semantic_score REAL NOT NULL,
-            hybrid_score REAL NOT NULL,
-            was_cited INTEGER NOT NULL CHECK (was_cited IN (0, 1)),
-            FOREIGN KEY (query_id) REFERENCES queries (id),
-            FOREIGN KEY (chunk_id) REFERENCES chunks (id)
-        )
-        """
-    )
-    conn.execute(
-        """
-        CREATE TABLE IF NOT EXISTS feedback (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            query_id INTEGER NOT NULL,
-            chunk_id INTEGER NOT NULL,
-            feedback_type TEXT NOT NULL CHECK (
-                feedback_type IN ('helpful', 'not_helpful', 'wrong_source')
-            ),
-            comment TEXT,
-            created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-            FOREIGN KEY (query_id) REFERENCES queries (id),
-            FOREIGN KEY (chunk_id) REFERENCES chunks (id)
-        )
-        """
-    )
-    conn.commit()
+    metadata.create_all(create_sqlite_engine(_resolve_db_path()))
 
 
 def insert_document(
