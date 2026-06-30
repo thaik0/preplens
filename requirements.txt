@@ -1,6 +1,7 @@
 fastapi
 httpx
 openai>=1.0.0
+psycopg[binary]
 pytest
 sqlalchemy
 uvicorn

@@ -1,14 +1,11 @@
-"""Focused SQLAlchemy Core access helpers for PrepLens database workflows.
-
-SQLite remains the only implemented backend. SQLAlchemy Core is the preferred
-database access path so application code has fewer sqlite3 assumptions to unwind
-before a future Postgres sprint.
-"""
+"""Focused SQLAlchemy Core access helpers for PrepLens database workflows."""
 
 from typing import Any
 
 from sqlalchemy import and_, case, func, insert, literal, or_, select
+from sqlalchemy.exc import SQLAlchemyError
 
+from src.config import get_database_url
 from src.database.engine import get_engine
 from src.database.schema import (
     answers,
@@ -29,7 +26,16 @@ FEEDBACK_TYPES = {"helpful", "not_helpful", "wrong_source"}
 def initialize_schema() -> None:
     """Create all known tables from SQLAlchemy Core metadata."""
     engine = get_engine()
-    metadata.create_all(engine)
+    try:
+        metadata.create_all(engine)
+    except SQLAlchemyError as exc:
+        if get_database_url():
+            raise RuntimeError(
+                "Unable to initialize the database schema from DATABASE_URL. "
+                "Verify that the configured database is reachable and that the "
+                "credentials have permission to create or inspect tables."
+            ) from exc
+        raise
 
 
 def insert_document_record(filename: str, filepath: str, file_type: str) -> int:
@@ -371,9 +377,10 @@ def get_query_details(query_id: int) -> tuple[dict[str, Any] | None, list[dict[s
         ),
         else_=literal(": ") + feedback.c.comment,
     )
-    feedback_text = func.coalesce(func.group_concat(feedback_item, "; "), "").label(
-        "feedback"
-    )
+    feedback_text = func.coalesce(
+        func.aggregate_strings(feedback_item, "; "),
+        "",
+    ).label("feedback")
     results_statement = (
         select(
             retrieval_results.c.rank,
